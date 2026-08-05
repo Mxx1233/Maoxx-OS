@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 已验收，Phase 1D-B 为下一未配置子阶段。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -37,11 +37,12 @@
 ### Phase 1D-A：GitHub Development Governance
 
 - 目标：main 分支保护、禁止直接 push/force push、任务分支、PR 强制流程、PR 模板、Codex Issue 模板、CODEOWNERS 和 migration 人工审查。
-- 当前状态：`implemented_pending_verification`；Public 仓库、Active `Protect main` Ruleset 和治理文件已配置，等待 stacked PR 及 Ruleset 非破坏性验证。
+- 当前状态：`accepted`；Public 仓库、Active `Protect main` Ruleset、强制 PR、治理模板、CODEOWNERS 和 migration 人工审查规则已通过实际 PR 流程验收。
 
 ### Phase 1D-B：GitHub Actions CI
 
 - 目标：Python 语法、format、lint、单元/API 测试、Alembic check、migration upgrade、Docker build、Compose config、secret scan 和破坏性 migration scan。
+- 当前状态：`not_configured`；下一子阶段，等待用户单独批准计划后实施。
 
 ### Phase 1D-C：Codex Cloud
 

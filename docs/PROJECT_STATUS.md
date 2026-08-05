@@ -4,11 +4,11 @@
 
 ## 当前阶段
 
-阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；其中 Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。阶段 2A 仍为 `not_started`。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A 已验收，Phase 1D-B 为下一未配置子阶段。阶段 2A 仍为 `not_started`。
 
 GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；required status checks 等待 Phase 1D-B，Phase 1D-A 治理文件仍待独立 PR 实施和验证。
 
-Phase 1D-A 当前为 `implemented_pending_verification`。PR/Issue 模板、CODEOWNERS 和治理文档已在独立 stacked 分支实现；合并前仍需核对 PR 页面、Ruleset 行为和文件范围。CODEOWNERS review 当前未强制。
+Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull Request 合并；PR/Issue 模板、CODEOWNERS、治理文档和 migration 人工审查规则均已进入 main。CODEOWNERS 强制审批、required approvals 和 required status checks 明确留待 Phase 1D-B 评审。
 
 ## 当前 Alembic revision
 
@@ -96,13 +96,13 @@ Phase 1D-A 当前为 `implemented_pending_verification`。PR/Issue 模板、CODE
 - 飞书回复已有界补偿重试，但尚无可靠 outbox，跨重启投递仍是已知限制。
 - API 尚无正式认证；当前依赖 localhost 网络边界。
 - 依赖和基础镜像尚未完全锁定。
-- GitHub Ruleset 和治理文件已建立但尚待 stacked PR 实际验证；Actions CI 尚未配置。
+- GitHub Ruleset 和治理文件已通过 Phase 1D-A 验收；Actions CI 和 required status checks 尚未配置，属于 Phase 1D-B。
 - Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
 - Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-完成 Phase 1D-A stacked PR 和 Ruleset 非破坏性验证后等待用户验收；不得自动进入 Phase 1D-B。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
+等待用户单独批准 Phase 1D-B 计划；不得自动实施 GitHub Actions CI。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
 
 ## 最近一次验收
 
