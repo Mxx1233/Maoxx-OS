@@ -1,0 +1,84 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: maoxx-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - maoxx_internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maoxx-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./storage:/app/storage
+    networks:
+      - maoxx_internal
+      - maoxx_public
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://127.0.0.1:8000/health',
+          timeout=5)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  feishu-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maoxx-feishu-worker
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - app.feishu_worker
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - maoxx_internal
+      - maoxx_public
+
+networks:
+  maoxx_internal:
+    name: maoxx_internal
+    internal: true
+
+  maoxx_public:
+    name: maoxx_public
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: maoxx_postgres_data
