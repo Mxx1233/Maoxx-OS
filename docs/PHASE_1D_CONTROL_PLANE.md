@@ -15,9 +15,9 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 | 1 | GitHub repository sync | partially_configured | Public 仓库和 `origin` 已配置；Phase 1D 变更仍通过待审 PR 推进，尚未同步到 main。 |
 | 2 | main branch protection | configured | 用户已确认 Active `Protect main` Ruleset：禁止删除和 force push，bypass 为空。 |
 | 3 | Pull Request mandatory workflow | configured | Ruleset 要求 PR 和 conversation resolution；required approvals 为 0，status checks 等待 Phase 1D-B。 |
-| 4 | PR template | not_configured | 不存在 `.github/pull_request_template.md`。 |
-| 5 | Codex task Issue template | not_configured | 不存在 `.github/ISSUE_TEMPLATE/`。 |
-| 6 | CODEOWNERS | not_configured | 仓库中不存在 CODEOWNERS。 |
+| 4 | PR template | configured | `.github/pull_request_template.md` 已实现，等待 PR 页面展示验证。 |
+| 5 | Codex task Issue template | configured | `.github/ISSUE_TEMPLATE/codex-task.yml` 和 `config.yml` 已实现。 |
+| 6 | CODEOWNERS | configured | `.github/CODEOWNERS` 由 `@Mxx1233` 覆盖全仓库和高风险路径；Ruleset 尚未强制 owner review。 |
 | 7 | GitHub Actions CI | not_configured | 不存在 `.github/workflows/`。 |
 | 8 | Python lint / format | not_configured | 无 Ruff/Black 等配置和自动执行入口。 |
 | 9 | unit and API tests in CI | not_configured | 本地测试存在，但没有 CI。 |
@@ -52,8 +52,8 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ### Phase 1D-A：GitHub Development Governance
 
-- 当前状态：`partially_configured`。
-- 实施：建立任务分支命名、PR/Codex Issue 模板、CODEOWNERS 和 migration review checklist；由用户在 GitHub 开启 main 保护、禁止 force push、禁止删除、要求 PR 和必需检查。
+- 当前阶段状态：`implemented_pending_verification`；审计维度为 `partially_configured`，等待 stacked PR 和 Ruleset 实际验证。
+- 实施：任务分支、PR/Codex Issue 模板、CODEOWNERS 和 migration review checklist 已建立；main Ruleset 已禁止直接 push、force push和删除，并要求 PR。required status checks 留待 Phase 1D-B。
 - 验收：受保护 main 无法直接 push；测试分支只能通过 PR 合并；force push/删除被拒绝；migration PR 明确触发人工审查。
 
 ### Phase 1D-B：GitHub Actions CI
@@ -88,9 +88,6 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ## 缺失文件
 
-- `.github/pull_request_template.md`
-- `.github/ISSUE_TEMPLATE/codex-task.yml`
-- `.github/CODEOWNERS`
 - `.github/workflows/ci.yml`
 - Python format/lint 配置（建议 `pyproject.toml`）
 - destructive migration scan 脚本及测试
@@ -118,4 +115,4 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ## 最小可执行的下一个任务
 
-Phase 1D-A 设计与仓库文件实现：新增 PR 模板、Codex task Issue 模板、CODEOWNERS 和 migration review checklist，并输出 GitHub main ruleset 的精确手工配置清单。先等待用户批准；不在本次状态纠正中实施。
+完成 Phase 1D-A stacked PR 创建和非破坏性 Ruleset 验证，等待用户审查；不得自动进入 Phase 1D-B。

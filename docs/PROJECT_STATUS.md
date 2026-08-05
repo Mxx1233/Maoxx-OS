@@ -8,6 +8,8 @@
 
 GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；required status checks 等待 Phase 1D-B，Phase 1D-A 治理文件仍待独立 PR 实施和验证。
 
+Phase 1D-A 当前为 `implemented_pending_verification`。PR/Issue 模板、CODEOWNERS 和治理文档已在独立 stacked 分支实现；合并前仍需核对 PR 页面、Ruleset 行为和文件范围。CODEOWNERS review 当前未强制。
+
 ## 当前 Alembic revision
 
 `0001_core_foundation`，同时也是当前唯一 head。ORM 已准确声明现有复合索引和唯一约束；2026-08-05 使用当前工作树实测 `alembic check` 无漂移。
@@ -94,13 +96,13 @@ GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、
 - 飞书回复已有界补偿重试，但尚无可靠 outbox，跨重启投递仍是已知限制。
 - API 尚无正式认证；当前依赖 localhost 网络边界。
 - 依赖和基础镜像尚未完全锁定。
-- GitHub 分支治理、PR 强制、CODEOWNERS、模板和 Actions CI 尚未在仓库中建立；网页设置当前无法验证。
+- GitHub Ruleset 和治理文件已建立但尚待 stacked PR 实际验证；Actions CI 尚未配置。
 - Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
 - Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-按 `docs/PHASE_1D_CONTROL_PLANE.md` 从 Phase 1D-A 开始逐子阶段设计、批准、实施和验收。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
+完成 Phase 1D-A stacked PR 和 Ruleset 非破坏性验证后等待用户验收；不得自动进入 Phase 1D-B。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
 
 ## 最近一次验收
 
