@@ -16,7 +16,14 @@ from app.services.feishu_authorization import (
     authorize_feishu_message,
     identifier_fingerprint,
 )
+from app.services.feishu_delivery import deliver_with_retry
 from app.services.feishu_replies import recorded_reply
+from app.services.worker_health import (
+    WORKER_HEALTH_HOST,
+    WORKER_HEALTH_PORT,
+    WorkerHealth,
+    start_health_server,
+)
 
 
 logging.basicConfig(
@@ -25,6 +32,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("maoxx-feishu-worker")
+worker_health = WorkerHealth()
 
 
 api_client = (
@@ -36,9 +44,7 @@ api_client = (
 )
 
 
-def reply_text(message_id: str, text: str) -> None:
-    """Reply to one Feishu message."""
-
+def _send_reply_once(message_id: str, text: str):
     request = (
         ReplyMessageRequest.builder()
         .message_id(message_id)
@@ -56,26 +62,31 @@ def reply_text(message_id: str, text: str) -> None:
         .build()
     )
 
-    response = api_client.im.v1.message.reply(request)
+    return api_client.im.v1.message.reply(request)
 
-    if not response.success():
-        logger.error(
-            "Reply failed: code=%s msg=%s log_id=%s",
-            response.code,
-            response.msg,
-            response.get_log_id(),
-        )
-        return
 
-    logger.info(
-        "Reply sent successfully: message_id=%s",
-        message_id,
+def reply_text(message_id: str, text: str) -> bool:
+    """Reply with bounded retries and no sensitive identifier logging."""
+
+    result = deliver_with_retry(
+        lambda: _send_reply_once(message_id, text),
+        max_attempts=settings.feishu_reply_max_attempts,
+        backoff_seconds=settings.feishu_reply_backoff_seconds,
     )
+    logger.info(
+        "event=feishu_reply_result sent=%s attempts=%s message=%s",
+        result.sent,
+        result.attempts,
+        identifier_fingerprint(message_id),
+    )
+    return result.sent
 
 
 def handle_message(data: P2ImMessageReceiveV1) -> None:
     """Save Feishu text messages to PostgreSQL and reply."""
 
+    worker_health.mark_event_received()
+    failed = False
     try:
         payload = json.loads(
             lark.JSON.marshal(data)
@@ -171,15 +182,15 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
             except IntegrityError:
                 db.rollback()
                 logger.info(
-                    "Duplicate Feishu message ignored: %s",
-                    message_id,
+                    "event=feishu_message_duplicate message=%s",
+                    identifier_fingerprint(message_id),
                 )
 
         if created:
             logger.info(
-                "Saved Feishu message: record_id=%s message_id=%s",
-                record.id,
-                message_id,
+                "event=feishu_message_saved record=%s message=%s",
+                identifier_fingerprint(str(record.id)),
+                identifier_fingerprint(message_id),
             )
 
             reply_text(
@@ -193,14 +204,24 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
             )
 
     except json.JSONDecodeError:
-        logger.exception(
-            "Failed to decode Feishu message content"
+        failed = True
+        logger.error(
+            "event=feishu_message_failed reason=invalid_json"
         )
 
-    except Exception:
-        logger.exception(
-            "Failed to process Feishu message"
+    except Exception as exc:
+        failed = True
+        logger.error(
+            "event=feishu_message_failed reason=unhandled_error "
+            "exception_type=%s",
+            type(exc).__name__,
         )
+
+    finally:
+        if failed:
+            worker_health.mark_event_failed()
+        else:
+            worker_health.mark_event_succeeded()
 
 
 event_handler = (
@@ -211,14 +232,33 @@ event_handler = (
 
 
 def main() -> None:
-    logger.info("Starting Maoxx OS Feishu Worker")
+    logger.info("event=worker_starting")
+    start_health_server(
+        worker_health,
+        WORKER_HEALTH_HOST,
+        WORKER_HEALTH_PORT,
+    )
 
-    ws_client = lark.ws.Client(
+    class ObservableWsClient(lark.ws.Client):
+        async def _connect(self) -> None:
+            await super()._connect()
+            if self._conn is not None:
+                worker_health.mark_connected()
+                logger.info("event=worker_connected")
+
+        async def _disconnect(self) -> None:
+            worker_health.mark_reconnecting()
+            logger.warning("event=worker_disconnected")
+            await super()._disconnect()
+
+    ws_client = ObservableWsClient(
         settings.feishu_app_id,
         settings.feishu_app_secret,
         event_handler=event_handler,
         log_level=lark.LogLevel.ERROR,
     )
+    ws_client.on_reconnecting = worker_health.mark_reconnecting
+    ws_client.on_reconnected = worker_health.mark_connected
 
     ws_client.start()
 
