@@ -1,7 +1,16 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,7 +66,15 @@ class User(Base):
 
 class Entity(Base):
     __tablename__ = "entities"
-    __table_args__ = {"schema": "core"}
+    __table_args__ = (
+        Index(
+            "ix_entities_user_type_status",
+            "user_id",
+            "entity_type",
+            "status_code",
+        ),
+        {"schema": "core"},
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -68,12 +85,10 @@ class Entity(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("core.users.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     entity_type: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        index=True,
     )
     title: Mapped[str | None] = mapped_column(
         String(300),
@@ -118,7 +133,19 @@ class Entity(Base):
 
 class RawInput(Base):
     __tablename__ = "raw_inputs"
-    __table_args__ = {"schema": "core"}
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_code",
+            "external_message_id",
+            name="uq_raw_inputs_channel_message",
+        ),
+        Index(
+            "ix_raw_inputs_user_received",
+            "user_id",
+            "received_at",
+        ),
+        {"schema": "core"},
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -129,7 +156,6 @@ class RawInput(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("core.users.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     channel_code: Mapped[str] = mapped_column(
         String(32),
