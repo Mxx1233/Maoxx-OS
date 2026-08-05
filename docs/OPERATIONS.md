@@ -29,7 +29,12 @@ curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:8000/health/db
 docker compose exec db sh -c \
   'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose exec -T feishu-worker python -c \
+  "import json,urllib.request; print(json.load(urllib.request.urlopen(\
+  'http://127.0.0.1:8081/health', timeout=5)))"
 ```
+
+Worker 健康端点只在容器内监听。HTTP 200 表示 SDK 已建立 WebSocket 连接；启动或重连期间返回 503。响应只包含状态、UTC 时间和事件计数，不包含凭据、正文或完整飞书身份标识。
 
 环境变量应由受控环境加载；不要在命令历史或报告中展开密码。
 
@@ -58,6 +63,27 @@ docker run --rm \
 ```
 
 命令将 `.env` 注入容器但不输出其内容。测试代码和报告不得打印真实身份或凭据。
+
+隔离 PostgreSQL migration/integration 测试需要显式启用。测试只创建随机 `maoxx_test_` 前缀数据库，从空库升级到 head，验证 revision、索引、约束和 `alembic check`，随后删除该测试库；不执行 downgrade：
+
+```bash
+api_image="$(docker compose images -q api)"
+docker run --rm \
+  --env-file .env \
+  --env RUN_DATABASE_INTEGRATION_TESTS=1 \
+  --network maoxx_internal \
+  --volume /opt/maoxx-os:/app:ro \
+  --workdir /app \
+  "${api_image}" python -m unittest tests.test_database_integration -v
+```
+
+## Worker 回复策略
+
+- 成功回复不重试。
+- 平台限流码和传输层超时/连接错误采用有上限的指数退避与抖动。
+- 永久应用错误立即停止，不盲目重试。
+- 日志只记录机器可读原因、错误码、尝试次数和不可逆消息指纹。
+- 当前没有持久化 outbox；进程退出后不保证未完成回复最终送达。若需要跨重启投递，必须单独评审数据库表和 migration。
 
 ## PostgreSQL 备份
 
@@ -109,6 +135,8 @@ docker compose restart feishu-worker
 ```
 
 数据库重启需评估连接和写入影响。重启后检查 `docker compose ps`、API 健康、数据库健康和 Worker 日志。
+
+Worker 重启或断线恢复后，还必须确认容器内健康端点重新返回 200 且 `connected=true`。容器 `running` 或进程存活本身不等于飞书连接 ready。
 
 ## Git 回滚
 

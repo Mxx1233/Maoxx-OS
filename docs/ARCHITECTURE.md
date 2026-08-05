@@ -21,6 +21,7 @@
 - `db`：PostgreSQL 16，仅连接 internal 网络，不发布宿主机端口。
 - `api`：FastAPI，同时连接 internal/public 网络，仅发布 `127.0.0.1:8000`。
 - `feishu-worker`：WebSocket Worker，同时连接 internal/public 网络，不发布宿主机端口。
+- `feishu-worker` 在容器内 `127.0.0.1:8081/health` 暴露连接 readiness，Compose healthcheck 使用该端点；端点不发布到宿主机或外部网络。
 - 命名卷保存 PostgreSQL 数据；宿主机 `storage/` 挂载给 API 作为本地文件目录。
 
 ## 目标架构
@@ -68,7 +69,9 @@ im.message.receive_v1
   -> safe acknowledgement
 ```
 
-授权校验已在阶段 1C 代码中实现，但真实白名单与新 Worker 尚未部署验收，不应被视为当前生产已生效能力。
+授权校验和真实 p2p 白名单已在阶段 1C 部署验收。阶段 1D 在此基础上增加 Worker 连接状态、事件计数和回复失败的脱敏可观测性；不改变业务交互。
+
+Worker 连接状态来自飞书 SDK 的实际连接、断开和重连生命周期。状态仅保存在 Worker 进程内，重启后重新建立；它是运维信号，不是业务事实，因此当前不写入 PostgreSQL。API 不代理该状态，避免在尚无正式 API 认证时扩大运维信息暴露面。
 
 ### API 流
 

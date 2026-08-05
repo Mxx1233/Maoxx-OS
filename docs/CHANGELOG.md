@@ -6,6 +6,29 @@
 
 当前没有已完成但尚未归入阶段验收的功能。
 
+## [Phase 1D] - 2026-08-05
+
+### Added
+
+- Worker 容器内连接 readiness、事件计数和 Compose healthcheck。
+- 飞书回复限流与传输错误的有界指数退避、抖动和失败分类。
+- Worker 健康、回复失败路径、日志隐私和隔离 PostgreSQL migration/integration 测试。
+
+### Changed
+
+- Worker 关键日志采用机器可读事件字段，并以不可逆指纹替代完整消息和记录标识。
+- 运维手册补充 Worker readiness、回复策略和隔离数据库测试流程。
+
+### Fixed
+
+- 运行中 API 镜像已与 `phase1c-accepted` ORM 元数据重新对齐，`alembic check` 恢复无漂移。
+
+### Known issues
+
+- 回复重试不持久化，Worker 重启后不保证尚未完成的回复最终送达。
+- Worker 连接观测依赖当前飞书 SDK 的内部连接生命周期方法，升级 SDK 时必须回归验证。
+- API 尚无正式认证，Worker 运维状态因此只在容器内开放。
+
 ## [Phase 1C] - 2026-08-05
 
 ### Added
