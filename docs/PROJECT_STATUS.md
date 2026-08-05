@@ -4,9 +4,9 @@
 
 ## 当前阶段
 
-阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A 已验收，Phase 1D-B 为下一未配置子阶段。阶段 2A 仍为 `not_started`。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A 已验收，Phase 1D-B 为 `implemented_pending_verification`。阶段 2A 仍为 `not_started`。
 
-GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；required status checks 等待 Phase 1D-B，Phase 1D-A 治理文件仍待独立 PR 实施和验证。
+GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；Phase 1D-B 首次 CI 通过后仍需由用户将 `CI / Quality Gate` 配为唯一 required status check。
 
 Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull Request 合并；PR/Issue 模板、CODEOWNERS、治理文档和 migration 人工审查规则均已进入 main。CODEOWNERS 强制审批、required approvals 和 required status checks 明确留待 Phase 1D-B 评审。
 
@@ -86,6 +86,7 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 - Worker 和 API 入口逻辑尚未抽取到统一 Service Layer。
 - 当前测试使用标准库 `unittest`；隔离 PostgreSQL migration 测试需要显式启用，尚未纳入持续集成平台。
 - 依赖和基础镜像使用版本范围或移动标签，构建尚未完全锁定。
+- Ruff formatter 仍精确排除 4 个沿用早期格式的既有文件；它们继续接受 Python compile 和基础 lint，批量格式化留待独立评审。
 - 当前 API 尚无正式认证机制。
 - Worker 连接观测适配飞书 SDK 的内部连接生命周期方法；SDK 升级时必须运行连接、断线和重连回归测试。
 - 回复重试仅在进程内执行，没有持久化 outbox，跨重启最终送达不受保证。
@@ -96,13 +97,13 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 - 飞书回复已有界补偿重试，但尚无可靠 outbox，跨重启投递仍是已知限制。
 - API 尚无正式认证；当前依赖 localhost 网络边界。
 - 依赖和基础镜像尚未完全锁定。
-- GitHub Ruleset 和治理文件已通过 Phase 1D-A 验收；Actions CI 和 required status checks 尚未配置，属于 Phase 1D-B。
+- GitHub Ruleset 和治理文件已通过 Phase 1D-A 验收；Actions CI 已在 Phase 1D-B 任务分支实现，首次运行和 required `CI / Quality Gate` 尚待验证。
 - Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
 - Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-等待用户单独批准 Phase 1D-B 计划；不得自动实施 GitHub Actions CI。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
+完成 Phase 1D-B 单一 Pull Request 的首次 Actions 验证后，等待用户配置 required `CI / Quality Gate`；不得自动合并、进入 Phase 1D-C 或进入 Phase 2A。
 
 ## 最近一次验收
 

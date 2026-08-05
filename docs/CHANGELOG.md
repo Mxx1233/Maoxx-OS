@@ -19,10 +19,17 @@
 
 - Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
 - GitHub 开发治理、main Ruleset、任务分支、PR 和 migration 人工审查规则。
+- Phase 1D-B 只读 GitHub Actions workflow：Python compile、Ruff、标准库测试、临时 PostgreSQL migration/integration、Compose config、Docker build 和统一 `CI / Quality Gate`。
+- 固定 Ruff 0.16.1 的开发依赖和最小 Python 3.12 lint/format 基线。
 
 ### Changed
 
-- Phase 1D-A 更新为 `accepted`；Phase 1D 保持 `in_progress`，Phase 1D-B 保持 `not_configured`，Phase 2A 保持 `not_started`。
+- Phase 1D-A 保持 `accepted`；Phase 1D-B 更新为 `implemented_pending_verification`，等待首次 Actions 和 required `CI / Quality Gate` 验证；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+
+### Known issues
+
+- Ruff formatter 精确排除 4 个既有格式文件，避免 Phase 1D-B 扩大为业务代码批量格式化；这些文件仍接受 compile 和 lint。
+- 当前单 PR CI 范围尚未加入独立 API 测试、secret scanning 或破坏性 migration 自动扫描，对应审计项不得标记为 `configured`。
 
 ## [Phase 1D-0] - 2026-08-05
 

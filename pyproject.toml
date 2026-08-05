@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+# These pre-existing files use an earlier formatting style. Keep them under
+# compile and lint checks without expanding Phase 1D-B into business-code edits.
+[tool.ruff.format]
+exclude = [
+    "app/config.py",
+    "app/feishu_worker.py",
+    "app/main.py",
+    "tests/test_feishu_delivery.py",
+]
