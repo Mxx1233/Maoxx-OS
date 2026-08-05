@@ -4,9 +4,13 @@
 
 ## [Unreleased]
 
-当前没有已完成但尚未归入阶段验收的功能。
+### Corrected
 
-## [Phase 1D] - 2026-08-05
+- 将 Phase 1D 从错误的 `accepted` 纠正为 `in_progress`；已交付能力重新定义为 Phase 1D-0：Server Observability and Execution Foundation。
+- 记录 Phase 1D-A 至 1D-F 的 Cloud Development Control Plane 缺口、实施顺序和验收标准。
+- 删除未推送的错误本地 `phase1d-accepted` tag；保留已验证的服务器功能提交。
+
+## [Phase 1D-0] - 2026-08-05
 
 ### Added
 
@@ -28,6 +32,7 @@
 - 回复重试不持久化，Worker 重启后不保证尚未完成的回复最终送达。
 - Worker 连接观测依赖当前飞书 SDK 的内部连接生命周期方法，升级 SDK 时必须回归验证。
 - API 尚无正式认证，Worker 运维状态因此只在容器内开放。
+- 本节仅代表服务器可观测性和执行基础完成；完整 Phase 1D 仍为 `in_progress`。
 
 ## [Phase 1C] - 2026-08-05
 

@@ -22,15 +22,43 @@
 - 明确不包括：阶段 2 业务表、媒体下载和模型接入。
 - 当前状态：`accepted`；Git、备份恢复、ORM 对齐、授权部署、安全回复、基础测试和真实飞书验收均已通过。
 
-## 阶段 1D：可观测性与质量加固
+## 阶段 1D：Cloud Development Control Plane
 
-- 目标：补齐 Worker 健康状态、结构化监控、可靠回复策略和更完整的集成测试基线。
-- 数据库表：不新增业务表；如需运维状态持久化，必须先单独评审。
-- API：评估独立 readiness 和仅供受控运维使用的 Worker 状态接口。
-- 飞书交互：验证断线恢复、限流、回复失败和幂等重试，不新增业务交互。
-- 验收标准：Worker 连接/消费状态可观测，关键失败有脱敏告警，数据库/API/飞书集成测试和恢复演练可重复执行。
+- 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
+- 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`accepted`；Worker 连接健康检查、脱敏运行状态、飞书回复有界重试、隔离数据库 migration 测试、备份恢复和真实飞书 p2p 验收均已通过。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。
+
+### Phase 1D-0：Server Observability and Execution Foundation
+
+- 已完成：Worker WebSocket 连接状态、Worker healthcheck、API 健康状态、飞书事件计数、日志脱敏、幂等/重试/错误分类、自动化测试、数据库备份恢复验证和 Alembic 无漂移。
+- 完成情况：已完成；这是服务器执行基础，不等同于完整 Cloud Development Control Plane。
+
+### Phase 1D-A：GitHub Development Governance
+
+- 目标：main 分支保护、禁止直接 push/force push、任务分支、PR 强制流程、PR 模板、Codex Issue 模板、CODEOWNERS 和 migration 人工审查。
+
+### Phase 1D-B：GitHub Actions CI
+
+- 目标：Python 语法、format、lint、单元/API 测试、Alembic check、migration upgrade、Docker build、Compose config、secret scan 和破坏性 migration scan。
+
+### Phase 1D-C：Codex Cloud
+
+- 目标：连接仓库、读取开发规则、建立无生产密钥的非生产环境，并完成只读任务、测试分支和测试 PR。
+
+### Phase 1D-D：Staging
+
+- 目标：建立与 Production 隔离、独立数据库和 storage、可按需启停且适应 2 CPU/2 GB RAM 的 Staging，并完成 migration 和健康验收。
+
+### Phase 1D-E：Feishu Supervision and Approval
+
+- 目标：通过飞书查看任务/计划/CI/PR/Staging，批准或退回计划、合并和 Production 部署，并具备身份校验、防重复审批和审计记录。
+
+### Phase 1D-F：Controlled Deployment
+
+- 目标：main 合并后部署 Staging，Production 独立审批，部署前备份和 migration 风险检查，Git SHA/镜像绑定、健康检查、失败回滚和飞书通知。
+
+完整缺口、实施顺序和验收标准见 `docs/PHASE_1D_CONTROL_PLANE.md`。
 
 ## 阶段 2A：媒体与原始输入
 

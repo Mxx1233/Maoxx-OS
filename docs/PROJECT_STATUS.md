@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-阶段 1C：安全、版本和迁移基线（已验收）。阶段 1D：可观测性与质量加固（已验收）。阶段 2A 仍为 `not_started`。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；其中 Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。阶段 2A 仍为 `not_started`。
 
 ## 当前 Alembic revision
 
@@ -38,7 +38,7 @@
 - 自动化基线扩展为 21 项默认执行测试及 1 项显式启用的隔离 PostgreSQL migration/integration 测试。
 - Phase 1D 部署前备份非空且 SHA-256 校验通过，并完成隔离数据库恢复验证；备份 revision 为 `0001_core_foundation`，关键行数为 users=1、entities=0、raw_inputs=9。
 
-## 阶段 1D 验收结果
+## Phase 1D-0 完成结果
 
 - Compose 配置有效，`db`、`api` 和 `feishu-worker` 均为 healthy。
 - Worker readiness 为 `connected=true`、`status=ready`；真实飞书测试后事件计数为 received=1、succeeded=1、failed=0，最近事件和成功时间均已更新。
@@ -48,6 +48,8 @@
 - Alembic current/head 均为 `0001_core_foundation`，`alembic check` 无漂移。
 - 21 项默认自动化测试通过；显式启用的隔离 PostgreSQL migration/integration 测试通过。
 - 部署前备份、SHA-256 和隔离恢复演练通过；未修改 schema、创建 migration 或执行 downgrade。
+
+上述结果只证明 Server Observability and Execution Foundation 已完成，不证明 GitHub 治理、CI、Codex Cloud、Staging、飞书监督审批或受控部署闭环已完成，因此不能作为完整 Phase 1D 验收依据。
 
 ## 阶段 1C 验收结果
 
@@ -73,7 +75,7 @@
 - API 绑定：`127.0.0.1:8000`。
 - PostgreSQL 不暴露宿主机端口。
 
-2026-08-05 Phase 1D 最终验收确认 `db`、`api` 和 `feishu-worker` healthy；Worker 返回 `connected=true`、`status=ready`。Compose 配置有效，Alembic current/head 均为 `0001_core_foundation` 且无漂移。该结果是时间点快照，不代替每次工作前检查。
+2026-08-05 Phase 1D-0 运行验收确认 `db`、`api` 和 `feishu-worker` healthy；Worker 返回 `connected=true`、`status=ready`。Compose 配置有效，Alembic current/head 均为 `0001_core_foundation` 且无漂移。该结果是服务器执行基础的时间点快照，不代表完整 Phase 1D 已验收。
 
 ## 已知技术债务
 
@@ -84,22 +86,23 @@
 - Worker 连接观测适配飞书 SDK 的内部连接生命周期方法；SDK 升级时必须运行连接、断线和重连回归测试。
 - 回复重试仅在进程内执行，没有持久化 outbox，跨重启最终送达不受保证。
 
-## 当前风险与 Phase 1D 范围
+## 当前风险与 Phase 1D 缺口
 
 - Worker 已能区分连接 ready 与进程 running；外部网络长时间中断演练尚未自动化。
 - 飞书回复已有界补偿重试，但尚无可靠 outbox，跨重启投递仍是已知限制。
 - API 尚无正式认证；当前依赖 localhost 网络边界。
 - 依赖和基础镜像尚未完全锁定。
+- GitHub 分支治理、PR 强制、CODEOWNERS、模板和 Actions CI 尚未在仓库中建立；网页设置当前无法验证。
+- Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
+- Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-Phase 1D 已验收。Phase 2A 仍为 `not_started`；只有用户单独批准后才能规划和实施，不得自动进入。
-
-阶段 1D 验收后，才可规划进入阶段 2A：媒体与原始输入。
+按 `docs/PHASE_1D_CONTROL_PLANE.md` 从 Phase 1D-A 开始逐子阶段设计、批准、实施和验收。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
 
 ## 最近一次验收
 
-阶段 1 基线已于 2026-08-05 建立：提交 `adfe64e`，annotated tag 为 `phase1-baseline`。阶段 1C 和 Phase 1D 均于 2026-08-05 完成最终运行验收；验收提交和 tag 见当前 Git 历史。
+阶段 1 基线已于 2026-08-05 建立：提交 `adfe64e`，annotated tag 为 `phase1-baseline`。阶段 1C 已完成验收并标记 `phase1c-accepted`。此前误建的本地 `phase1d-accepted` tag 已删除；对应服务器功能提交保留，不回滚已验证能力。
 
 运行状态可能随部署变化。代理开始工作时必须以实际只读检查为准，并报告与本文档的差异。
 
