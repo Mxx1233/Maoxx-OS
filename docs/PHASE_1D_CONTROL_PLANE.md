@@ -12,7 +12,7 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 | # | 核验项目 | 状态 | 证据或缺口 |
 |---:|---|---|---|
-| 1 | GitHub repository sync | partially_configured | Public 仓库和 `origin` 已配置；Phase 1D 变更仍通过待审 PR 推进，尚未同步到 main。 |
+| 1 | GitHub repository sync | configured | Public 仓库和 `origin` 已配置；PR #2、#3、#4 已独立合并，本地 main 与 `origin/main` 同步。 |
 | 2 | main branch protection | configured | 用户已确认 Active `Protect main` Ruleset：禁止删除和 force push，bypass 为空。 |
 | 3 | Pull Request mandatory workflow | configured | Ruleset 要求 PR 和 conversation resolution；required approvals 为 0，status checks 等待 Phase 1D-B。 |
 | 4 | PR template | configured | `.github/pull_request_template.md` 已实现，等待 PR 页面展示验证。 |
@@ -52,7 +52,7 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ### Phase 1D-A：GitHub Development Governance
 
-- 当前阶段状态：`implemented_pending_verification`；审计维度为 `partially_configured`，等待 stacked PR 和 Ruleset 实际验证。
+- 当前阶段状态：`accepted`；审计项 1–6 均为 `configured`，用户已完成最终验收。
 - 实施：任务分支、PR/Codex Issue 模板、CODEOWNERS 和 migration review checklist 已建立；main Ruleset 已禁止直接 push、force push和删除，并要求 PR。required status checks 留待 Phase 1D-B。
 - 验收：受保护 main 无法直接 push；测试分支只能通过 PR 合并；force push/删除被拒绝；migration PR 明确触发人工审查。
 
@@ -106,8 +106,8 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ## 推荐实施顺序
 
-1. Phase 1D-A：先建立 GitHub 变更治理和保护边界。
-2. Phase 1D-B：让 PR 具备可强制执行的质量门禁。
+1. Phase 1D-A：已验收 GitHub 变更治理和保护边界。
+2. Phase 1D-B：下一子阶段；让 PR 具备可强制执行的质量门禁，尚未开始实施。
 3. Phase 1D-C：让 Codex Cloud 在相同治理和 CI 下完成最小权限验证。
 4. Phase 1D-D：建立与 Production 隔离的验证目标。
 5. Phase 1D-E：在明确 PR、CI、Staging 状态后建立飞书监督审批。
@@ -115,4 +115,4 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ## 最小可执行的下一个任务
 
-完成 Phase 1D-A stacked PR 创建和非破坏性 Ruleset 验证，等待用户审查；不得自动进入 Phase 1D-B。
+等待用户单独批准 Phase 1D-B 设计与实施；不得自动开始 CI 工作，不得进入 Phase 2A。
