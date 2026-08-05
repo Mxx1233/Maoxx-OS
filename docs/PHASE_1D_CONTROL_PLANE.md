@@ -6,18 +6,18 @@ Phase 1D 当前状态为 `in_progress`。Phase 1D-0：Server Observability and E
 
 Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 Phase 1D 验收前不得进入。
 
-本审计只使用：`configured`、`partially_configured`、`not_configured`、`cannot_verify`。GitHub CLI 当前不可用，也没有可用的已认证 GitHub 设置接口；GitHub 和 Codex Cloud 网页私有设置在没有证据时均标记 `cannot_verify`。
+本审计表只使用：`configured`、`partially_configured`、`not_configured`、`cannot_verify`。GitHub 网页状态可使用用户提供的明确配置证据；Codex Cloud 私有设置在没有证据时仍标记 `cannot_verify`。
 
 ## 35 项缺口审计
 
 | # | 核验项目 | 状态 | 证据或缺口 |
 |---:|---|---|---|
 | 1 | GitHub repository sync | partially_configured | 已配置 `origin`，但本地 main 含未推送提交，`origin/main` 仍停留在 Phase 1C。 |
-| 2 | main branch protection | cannot_verify | 需要 GitHub Settings 或已认证 API 证据。 |
-| 3 | Pull Request mandatory workflow | cannot_verify | 仓库无策略文件；远端规则无法验证。 |
-| 4 | PR template | not_configured | 不存在 `.github/pull_request_template.md`。 |
-| 5 | Codex task Issue template | not_configured | 不存在 `.github/ISSUE_TEMPLATE/`。 |
-| 6 | CODEOWNERS | not_configured | 仓库中不存在 CODEOWNERS。 |
+| 2 | main branch protection | configured | 用户确认 Public 仓库的 Active `Protect main` Ruleset 覆盖默认分支，禁止删除/force push，bypass 为空。 |
+| 3 | Pull Request mandatory workflow | configured | Ruleset 要求 PR 和 conversation resolution；required approvals 当前为 0，status checks 等待 1D-B。 |
+| 4 | PR template | configured | `.github/pull_request_template.md` 已实现，等待 PR 展示验证。 |
+| 5 | Codex task Issue template | configured | `.github/ISSUE_TEMPLATE/codex-task.yml` 和 `config.yml` 已实现。 |
+| 6 | CODEOWNERS | configured | `.github/CODEOWNERS` 由 `@Mxx1233` 覆盖全仓库和高风险路径；Ruleset 尚未强制 owner review。 |
 | 7 | GitHub Actions CI | not_configured | 不存在 `.github/workflows/`。 |
 | 8 | Python lint / format | not_configured | 无 Ruff/Black 等配置和自动执行入口。 |
 | 9 | unit and API tests in CI | not_configured | 本地测试存在，但没有 CI。 |
@@ -52,7 +52,7 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ### Phase 1D-A：GitHub Development Governance
 
-- 当前状态：`partially_configured`。
+- 当前阶段状态：`implemented_pending_verification`；审计维度为 `partially_configured`，等待分支和 PR 实际验证。
 - 实施：建立任务分支命名、PR/Codex Issue 模板、CODEOWNERS 和 migration review checklist；由用户在 GitHub 开启 main 保护、禁止 force push、禁止删除、要求 PR 和必需检查。
 - 验收：受保护 main 无法直接 push；测试分支只能通过 PR 合并；force push/删除被拒绝；migration PR 明确触发人工审查。
 

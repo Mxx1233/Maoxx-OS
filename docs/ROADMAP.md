@@ -37,6 +37,7 @@
 ### Phase 1D-A：GitHub Development Governance
 
 - 目标：main 分支保护、禁止直接 push/force push、任务分支、PR 强制流程、PR 模板、Codex Issue 模板、CODEOWNERS 和 migration 人工审查。
+- 当前状态：`implemented_pending_verification`；仓库治理文件已实现，等待测试分支 push、PR 创建和 Ruleset 非破坏性验证。
 
 ### Phase 1D-B：GitHub Actions CI
 

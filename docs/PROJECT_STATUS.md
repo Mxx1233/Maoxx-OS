@@ -6,6 +6,8 @@
 
 阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；其中 Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。阶段 2A 仍为 `not_started`。
 
+Phase 1D-A 当前为 `implemented_pending_verification`。GitHub 仓库已由用户确认为 Public，`Protect main` Ruleset 已启用 required PR、conversation resolution、禁止删除和 force push，且 bypass list 为空；required status checks 等待 Phase 1D-B，CODEOWNERS review 当前未强制。
+
 ## 当前 Alembic revision
 
 `0001_core_foundation`，同时也是当前唯一 head。ORM 已准确声明现有复合索引和唯一约束；2026-08-05 使用当前工作树实测 `alembic check` 无漂移。
@@ -95,10 +97,11 @@
 - GitHub 分支治理、PR 强制、CODEOWNERS、模板和 Actions CI 尚未在仓库中建立；网页设置当前无法验证。
 - Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
 - Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
+- Phase 1D-A 治理文件已实现，但在测试分支 push 和 PR 非破坏性验证完成前不能标记 accepted/configured。
 
 ## 下一步
 
-按 `docs/PHASE_1D_CONTROL_PLANE.md` 从 Phase 1D-A 开始逐子阶段设计、批准、实施和验收。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
+完成 Phase 1D-A 测试分支、PR 和 Ruleset 验证后等待用户验收，再规划 Phase 1D-B。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
 
 ## 最近一次验收
 
