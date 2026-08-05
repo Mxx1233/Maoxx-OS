@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+当前没有已完成但尚未归入阶段验收的功能。
+
+## [Phase 1C] - 2026-08-05
+
 ### Added
 
 - 长期 AI 开发上下文文档、开发规则和架构决策记录。
@@ -18,9 +22,10 @@
 
 ### Known issues
 
-- 飞书真实白名单尚未写入服务器环境，新增授权代码尚未部署和实测。
 - Worker 可观测健康状态尚未建立。
 - 完整数据库 integration/migration 测试尚未建立。
+- 飞书回复尚无可靠 outbox 或补偿重试。
+- API 尚无正式认证，当前依赖 localhost 网络边界。
 
 ## [Phase 1 baseline] - 2026-08-05
 

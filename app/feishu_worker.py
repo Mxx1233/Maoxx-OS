@@ -31,7 +31,7 @@ api_client = (
     lark.Client.builder()
     .app_id(settings.feishu_app_id)
     .app_secret(settings.feishu_app_secret)
-    .log_level(lark.LogLevel.INFO)
+    .log_level(lark.LogLevel.ERROR)
     .build()
 )
 
@@ -217,7 +217,7 @@ def main() -> None:
         settings.feishu_app_id,
         settings.feishu_app_secret,
         event_handler=event_handler,
-        log_level=lark.LogLevel.INFO,
+        log_level=lark.LogLevel.ERROR,
     )
 
     ws_client.start()
