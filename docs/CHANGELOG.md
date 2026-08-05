@@ -11,6 +11,15 @@
 - 删除未推送的错误本地 `phase1d-accepted` tag；保留已验证的服务器功能提交。
 - 记录 Public GitHub 仓库和 Active `Protect main` Ruleset 的已确认状态；required status checks 留待 Phase 1D-B。
 
+### Added
+
+- Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
+- GitHub 开发治理、main Ruleset、任务分支、PR 和 migration 人工审查规则。
+
+### Changed
+
+- Phase 1D-A 更新为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+
 ## [Phase 1D-0] - 2026-08-05
 
 ### Added

@@ -1,0 +1,87 @@
+name: Codex engineering task
+description: Plan and execute one approved Maoxx OS task with repository safeguards.
+title: "[Codex] "
+labels:
+  - codex
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for bounded Codex work. Never include credentials, private user content, backups, or complete sensitive identifiers.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: State the concrete outcome and why it is needed.
+    validations:
+      required: true
+
+  - type: input
+    id: phase
+    attributes:
+      label: Current roadmap phase
+      description: The approved phase/subphase from docs/ROADMAP.md.
+      placeholder: Phase 1D-A
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      description: List files, components, and behaviors that may change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Explicitly out of scope
+      description: State phase boundaries and prohibited changes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Provide observable, testable completion conditions.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: codex_rules
+    attributes:
+      label: Required Codex workflow
+      options:
+        - label: 开始前完整阅读 AGENTS.md 和规定的 docs/ADR
+          required: true
+        - label: 开始实施前先输出 Plan、范围、风险和验证方法
+          required: true
+        - label: 等待用户明确批准后再实施
+          required: true
+        - label: 不得跨阶段开发
+          required: true
+        - label: 必须使用独立任务分支，不得直接修改或 push main
+          required: true
+        - label: 不得自动部署 Production
+          required: true
+        - label: 不得读取、输出或提交 Secret、Token、用户数据或备份
+          required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation
+      description: List tests, migration checks, security checks, backup, and rollback evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approvals
+    attributes:
+      label: Required manual approvals
+      description: Identify approvals for design, migration, merge, staging, or production deployment.
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+# Default ownership for every tracked path.
+/** @Mxx1233
+
+# High-risk governance, schema, runtime, and architecture paths.
+/.github/ @Mxx1233
+/alembic/ @Mxx1233
+/app/models/ @Mxx1233
+/docker-compose.yml @Mxx1233
+/Dockerfile @Mxx1233
+/docs/adr/ @Mxx1233
+/AGENTS.md @Mxx1233
