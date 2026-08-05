@@ -17,7 +17,7 @@ User-verified GitHub configuration on 2026-08-05:
 - Required approvals: 0 during Phase 1D-A.
 - Require conversation resolution before merging: enabled.
 - Require CODEOWNERS review: disabled during Phase 1D-A.
-- Required status checks: not yet enabled; Phase 1D-B will add CI first.
+- Required status checks: `CI / Quality Gate` is the only required check.
 - Bypass list: empty.
 
 Direct push, force push, branch deletion, and bypass attempts against `main` are prohibited. Do not test deletion or force-push protection by performing destructive operations; verify them from the active ruleset and normal PR behavior.
@@ -43,15 +43,40 @@ An executed migration is immutable. Destructive work requires a verified backup,
 
 `@Mxx1233` owns the complete repository, with explicit entries for GitHub governance, Alembic, database models, Compose, Dockerfile, ADRs, and `AGENTS.md`. CODEOWNERS review is not yet enforced by the ruleset and must not be claimed as required.
 
-## Phase 1D-A verification
+## Phase 1D-A acceptance
 
-Phase 1D-A remains `implemented_pending_verification` until:
+Phase 1D-A is `accepted`. Its evidence includes:
 
-- the test branch is pushed successfully;
-- a Pull Request targeting `main` exists and displays the PR template;
+- independent task branches and Pull Requests #2, #3 and #4;
+- the Pull Request template and Codex task Issue template in `main`;
 - CODEOWNERS resolves to `@Mxx1233` for changed paths;
 - the active ruleset proves deletion/force-push restrictions, required PR, conversation resolution, and empty bypass;
 - normal non-destructive evidence proves direct main push is rejected;
-- the PR remains unmerged during verification.
+- all Phase 1D-A changes merged through Pull Requests rather than direct push.
 
-Phase 1D-B will add required status checks only after CI is separately designed and approved.
+## Phase 1D-B CI gate
+
+Phase 1D-B is `accepted`. The `CI`
+workflow runs on Pull Requests targeting `main`, pushes to `main`, and manual
+dispatch. It grants only `contents: read`, does not persist checkout
+credentials, and has no deployment, package, Pull Request, or OIDC write
+permission.
+
+The workflow uses these stable job names:
+
+- `CI / Quality`
+- `CI / Unit Tests`
+- `CI / PostgreSQL Integration`
+- `CI / Docker Build`
+- `CI / Quality Gate`
+
+Only `CI / Quality Gate` is required by the Ruleset. It succeeds only when all
+four execution jobs succeed. Commit `d832430` deliberately introduced an
+unresolvable CI-only development dependency: `CI / Quality` and the gate failed,
+and PR #7 became `unstable`. Ordinary commit `911ef67` removed that line; all
+five jobs then passed. No history was rewritten.
+
+CI uses only fixed non-production placeholders and an ephemeral PostgreSQL 16
+service container. It does not read Production `.env`, use repository Secrets,
+contact the Production server, send Feishu messages, call an LLM, push an
+image, or deploy. PR #7 remains subject to manual Squash and merge.

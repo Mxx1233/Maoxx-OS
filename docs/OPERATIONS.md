@@ -77,6 +77,33 @@ docker run --rm \
   "${api_image}" python -m unittest tests.test_database_integration -v
 ```
 
+## GitHub Actions CI
+
+`.github/workflows/ci.yml` 在 Pull Request、`main` push 和人工 dispatch 时运行：
+
+- `CI / Quality`：Python compile、Ruff lint/format 和 Compose config。
+- `CI / Unit Tests`：默认标准库测试。
+- `CI / PostgreSQL Integration`：在临时 PostgreSQL 16 service 中执行
+  upgrade、heads/current/check 和隔离 migration 测试。
+- `CI / Docker Build`：只构建本地 runner 镜像，不登录或 push registry。
+- `CI / Quality Gate`：要求以上四项全部成功。
+
+Ruleset 只应要求 `CI / Quality Gate`。Workflow 权限为
+`contents: read`，checkout 不保留凭据；不得向它添加 Production `.env`、
+Secret、PAT、部署权限或服务器访问。CI 固定测试值不是生产凭据，runner
+销毁时连同临时数据库一起消失。
+
+本地 Ruff 基线：
+
+```bash
+python -m pip install --requirement requirements-dev.txt
+ruff check app tests
+ruff format --check app tests
+```
+
+四个既有文件仍使用早期格式并被 formatter 精确排除，但继续接受 compile
+和 lint。不要借 CI 维护任务批量格式化业务代码；后续应单独评审和清理。
+
 ## Worker 回复策略
 
 - 成功回复不重试。
