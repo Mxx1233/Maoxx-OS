@@ -4,7 +4,9 @@
 
 ## 当前阶段
 
-阶段 1C：安全、版本和迁移基线（已验收）。阶段 1D 仅为 `planned`，尚未开始实施。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；其中 Phase 1D-0 已完成，Phase 1D-A 至 1D-F 尚未完成验收。阶段 2A 仍为 `not_started`。
+
+GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；required status checks 等待 Phase 1D-B，Phase 1D-A 治理文件仍待独立 PR 实施和验证。
 
 ## 当前 Alembic revision
 
@@ -31,6 +33,25 @@
 - 真实飞书 p2p 白名单已配置并在重建后的 Worker 上完成入库及“已记录。”回复验收。
 - 飞书 SDK 日志级别已调整为 `ERROR`，避免记录 WebSocket 连接凭据。
 - 一次性身份诊断代码和 `/tmp/feishu_identity.txt` 已删除。
+- 阶段 1D 已恢复运行中 API 镜像与 `phase1c-accepted` 源码的一致性，`alembic check` 无漂移。
+- Worker 已增加基于实际 SDK 连接生命周期的容器内 readiness、事件计数和 Compose healthcheck。
+- 飞书回复已增加限流/传输错误分类、有上限指数退避与抖动；永久错误不盲目重试。
+- 消息与数据库记录日志已改用不可逆指纹，异常日志不输出异常正文。
+- 自动化基线扩展为 21 项默认执行测试及 1 项显式启用的隔离 PostgreSQL migration/integration 测试。
+- Phase 1D 部署前备份非空且 SHA-256 校验通过，并完成隔离数据库恢复验证；备份 revision 为 `0001_core_foundation`，关键行数为 users=1、entities=0、raw_inputs=9。
+
+## Phase 1D-0 完成结果
+
+- Compose 配置有效，`db`、`api` 和 `feishu-worker` 均为 healthy。
+- Worker readiness 为 `connected=true`、`status=ready`；真实飞书测试后事件计数为 received=1、succeeded=1、failed=0，最近事件和成功时间均已更新。
+- 授权用户的真实 p2p 文字消息只新增 1 条 `core.raw_inputs`，总数由备份快照的 9 增至 10，并收到固定“已记录。”回复。
+- 最近 Worker 日志与最新消息正文、tenant、open_id 和 App Secret 完成精确不回显扫描，并通过 Token/凭据模式扫描；未发现敏感原值。
+- API `/health`、`/health/db` 和 PostgreSQL readiness 正常。
+- Alembic current/head 均为 `0001_core_foundation`，`alembic check` 无漂移。
+- 21 项默认自动化测试通过；显式启用的隔离 PostgreSQL migration/integration 测试通过。
+- 部署前备份、SHA-256 和隔离恢复演练通过；未修改 schema、创建 migration 或执行 downgrade。
+
+上述结果只证明 Server Observability and Execution Foundation 已完成，不证明 GitHub 治理、CI、Codex Cloud、Staging、飞书监督审批或受控部署闭环已完成，因此不能作为完整 Phase 1D 验收依据。
 
 ## 阶段 1C 验收结果
 
@@ -56,32 +77,34 @@
 - API 绑定：`127.0.0.1:8000`。
 - PostgreSQL 不暴露宿主机端口。
 
-2026-08-05 最近一次只读检查确认 `db` 与 `api` healthy、`feishu-worker` running、Compose 配置有效。该结果是时间点快照，不代替每次工作前检查。
+2026-08-05 Phase 1D-0 运行验收确认 `db`、`api` 和 `feishu-worker` healthy；Worker 返回 `connected=true`、`status=ready`。Compose 配置有效，Alembic current/head 均为 `0001_core_foundation` 且无漂移。该结果是服务器执行基础的时间点快照，不代表完整 Phase 1D 已验收。
 
 ## 已知技术债务
 
 - Worker 和 API 入口逻辑尚未抽取到统一 Service Layer。
-- 当前测试使用标准库 `unittest`，尚无独立临时 PostgreSQL 的完整 migration 测试套件。
-- Worker 缺少 healthcheck、结构化监控和可靠回复重试机制。
+- 当前测试使用标准库 `unittest`；隔离 PostgreSQL migration 测试需要显式启用，尚未纳入持续集成平台。
 - 依赖和基础镜像使用版本范围或移动标签，构建尚未完全锁定。
 - 当前 API 尚无正式认证机制。
+- Worker 连接观测适配飞书 SDK 的内部连接生命周期方法；SDK 升级时必须运行连接、断线和重连回归测试。
+- 回复重试仅在进程内执行，没有持久化 outbox，跨重启最终送达不受保证。
 
-## 当前风险与 Phase 1D 范围
+## 当前风险与 Phase 1D 缺口
 
-- Worker 缺少独立健康检查，容器 running 不代表 WebSocket 正常消费。
-- 飞书回复失败尚无可靠 outbox 或补偿重试。
+- Worker 已能区分连接 ready 与进程 running；外部网络长时间中断演练尚未自动化。
+- 飞书回复已有界补偿重试，但尚无可靠 outbox，跨重启投递仍是已知限制。
 - API 尚无正式认证；当前依赖 localhost 网络边界。
 - 依赖和基础镜像尚未完全锁定。
+- GitHub 分支治理、PR 强制、CODEOWNERS、模板和 Actions CI 尚未在仓库中建立；网页设置当前无法验证。
+- Codex Cloud 连接、权限、非生产环境、只读任务、测试分支和测试 PR 无可验证证据。
+- Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-等待用户批准是否进入阶段 1D。阶段 1D 只做可观测性与质量加固，不得创建阶段 2 表，也不得自动进入阶段 2A。
-
-阶段 1D 验收后，才可规划进入阶段 2A：媒体与原始输入。
+按 `docs/PHASE_1D_CONTROL_PLANE.md` 从 Phase 1D-A 开始逐子阶段设计、批准、实施和验收。完整 Phase 1D accepted 前不得规划或进入 Phase 2A。
 
 ## 最近一次验收
 
-阶段 1 基线已于 2026-08-05 建立：提交 `adfe64e`，annotated tag 为 `phase1-baseline`。阶段 1C 于 2026-08-05 完成最终运行验收；验收提交和 tag 见当前 Git 历史。
+阶段 1 基线已于 2026-08-05 建立：提交 `adfe64e`，annotated tag 为 `phase1-baseline`。阶段 1C 已完成验收并标记 `phase1c-accepted`。此前误建的本地 `phase1d-accepted` tag 已删除；对应服务器功能提交保留，不回滚已验证能力。
 
 运行状态可能随部署变化。代理开始工作时必须以实际只读检查为准，并报告与本文档的差异。
 
