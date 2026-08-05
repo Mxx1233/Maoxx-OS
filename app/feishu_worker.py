@@ -12,6 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.db import SessionLocal
 from app.models import RawInput
+from app.services.feishu_authorization import (
+    authorize_feishu_message,
+    identifier_fingerprint,
+)
 
 
 logging.basicConfig(
@@ -82,9 +86,27 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
         sender_id = sender.get("sender_id") or {}
         message = event.get("message") or {}
 
-        # 只处理真实用户发送的消息，避免处理机器人消息。
-        if sender.get("sender_type") != "user":
-            logger.info("Ignored non-user event")
+        tenant_key = header.get("tenant_key")
+        sender_open_id = sender_id.get("open_id")
+        chat_type = message.get("chat_type")
+
+        authorization = authorize_feishu_message(
+            tenant_key=tenant_key,
+            sender_type=sender.get("sender_type"),
+            sender_open_id=sender_open_id,
+            chat_type=chat_type,
+            allowed_tenant_keys=settings.allowed_tenant_keys,
+            allowed_open_ids=settings.allowed_open_ids,
+            allowed_chat_types=settings.allowed_chat_types,
+        )
+
+        if not authorization.allowed:
+            logger.warning(
+                "Rejected Feishu event: reason=%s tenant=%s sender=%s",
+                authorization.reason,
+                identifier_fingerprint(tenant_key),
+                identifier_fingerprint(sender_open_id),
+            )
             return
 
         message_id = message.get("message_id")
@@ -118,10 +140,10 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
 
         metadata = {
             "event_id": header.get("event_id"),
-            "sender_open_id": sender_id.get("open_id"),
+            "sender_open_id": sender_open_id,
             "sender_union_id": sender_id.get("union_id"),
             "chat_id": message.get("chat_id"),
-            "chat_type": message.get("chat_type"),
+            "chat_type": chat_type,
             "create_time": message.get("create_time"),
         }
 
