@@ -43,6 +43,22 @@ docker compose exec api alembic check
 
 上线前要求 current 与预期 revision 一致、只有预期 head，且 check 无漂移。
 
+## 自动化测试
+
+使用项目当前 API 镜像和只读工作树运行标准库测试，无需在宿主机安装依赖：
+
+```bash
+api_image="$(docker compose images -q api)"
+docker run --rm \
+  --env-file .env \
+  --network maoxx_internal \
+  --volume /opt/maoxx-os:/app:ro \
+  --workdir /app \
+  "${api_image}" python -m unittest discover -s tests -v
+```
+
+命令将 `.env` 注入容器但不输出其内容。测试代码和报告不得打印真实身份或凭据。
+
 ## PostgreSQL 备份
 
 在受限权限的 `backups/` 中创建自定义格式备份：

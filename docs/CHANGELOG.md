@@ -7,13 +7,20 @@
 ### Added
 
 - 长期 AI 开发上下文文档、开发规则和架构决策记录。
+- 飞书 tenant、sender type、sender `open_id` 和 chat type 的默认拒绝授权策略。
+- 配置、飞书授权、安全回复和 ORM 元数据的标准库单元测试。
+- PostgreSQL 自定义格式备份、SHA-256 校验和临时恢复演练。
+
+### Changed
+
+- SQLAlchemy 元数据已与 `0001_core_foundation` 的复合索引和消息去重约束对齐。
+- 飞书成功确认固定为“已记录。”，不再拼接用户原始内容。
 
 ### Known issues
 
-- ORM 元数据与已执行的 `0001_core_foundation` 存在索引和唯一约束声明漂移。
-- 飞书 tenant、sender 和 chat type 授权尚未完成。
-- 敏感确认回复尚未改为不回显原文。
-- 自动化测试和 Worker 可观测健康状态尚未建立。
+- 飞书真实白名单尚未写入服务器环境，新增授权代码尚未部署和实测。
+- Worker 可观测健康状态尚未建立。
+- 完整数据库 integration/migration 测试尚未建立。
 
 ## [Phase 1 baseline] - 2026-08-05
 

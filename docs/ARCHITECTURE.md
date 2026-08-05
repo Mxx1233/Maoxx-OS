@@ -68,7 +68,7 @@ im.message.receive_v1
   -> safe acknowledgement
 ```
 
-授权校验是阶段 1C 目标，当前尚未完成，不应被视为现有能力。
+授权校验已在阶段 1C 代码中实现，但真实白名单与新 Worker 尚未部署验收，不应被视为当前生产已生效能力。
 
 ### API 流
 
