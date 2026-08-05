@@ -14,6 +14,7 @@
 ### Accepted
 
 - Phase 1D-A GitHub Development Governance 已通过用户验收：PR #2、#3、#4 独立合并，main Ruleset、模板、CODEOWNERS 和 migration 人工审查规则均已验证。
+- Phase 1D-B GitHub Actions CI 已通过验收：五个 job 全绿，`CI / Quality Gate` 已成为唯一 required check，临时失败与普通修复 commit 已验证失败阻断和恢复路径。
 
 ### Added
 
@@ -24,7 +25,7 @@
 
 ### Changed
 
-- Phase 1D-A 保持 `accepted`；Phase 1D-B 更新为 `implemented_pending_verification`，等待首次 Actions 和 required `CI / Quality Gate` 验证；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+- Phase 1D-A 和 Phase 1D-B 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
 
 ### Known issues
 

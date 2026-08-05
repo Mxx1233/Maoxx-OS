@@ -17,8 +17,7 @@ User-verified GitHub configuration on 2026-08-05:
 - Required approvals: 0 during Phase 1D-A.
 - Require conversation resolution before merging: enabled.
 - Require CODEOWNERS review: disabled during Phase 1D-A.
-- Required status checks: waiting for the first Phase 1D-B CI run; after it
-  succeeds, the Ruleset must require only `CI / Quality Gate`.
+- Required status checks: `CI / Quality Gate` is the only required check.
 - Bypass list: empty.
 
 Direct push, force push, branch deletion, and bypass attempts against `main` are prohibited. Do not test deletion or force-push protection by performing destructive operations; verify them from the active ruleset and normal PR behavior.
@@ -57,7 +56,7 @@ Phase 1D-A is `accepted`. Its evidence includes:
 
 ## Phase 1D-B CI gate
 
-Phase 1D-B is `implemented_pending_verification` on its task branch. The `CI`
+Phase 1D-B is `accepted`. The `CI`
 workflow runs on Pull Requests targeting `main`, pushes to `main`, and manual
 dispatch. It grants only `contents: read`, does not persist checkout
 credentials, and has no deployment, package, Pull Request, or OIDC write
@@ -71,13 +70,13 @@ The workflow uses these stable job names:
 - `CI / Docker Build`
 - `CI / Quality Gate`
 
-Only `CI / Quality Gate` is intended as a required Ruleset check. It succeeds
-only when all four execution jobs succeed. The user must enable that check only
-after its first successful run, then verify that a failing dependency blocks
-the gate and merge.
+Only `CI / Quality Gate` is required by the Ruleset. It succeeds only when all
+four execution jobs succeed. Commit `d832430` deliberately introduced an
+unresolvable CI-only development dependency: `CI / Quality` and the gate failed,
+and PR #7 became `unstable`. Ordinary commit `911ef67` removed that line; all
+five jobs then passed. No history was rewritten.
 
 CI uses only fixed non-production placeholders and an ephemeral PostgreSQL 16
 service container. It does not read Production `.env`, use repository Secrets,
 contact the Production server, send Feishu messages, call an LLM, push an
-image, or deploy. Phase 1D-B remains pending until the workflow and Ruleset are
-verified in the Pull Request.
+image, or deploy. PR #7 remains subject to manual Squash and merge.

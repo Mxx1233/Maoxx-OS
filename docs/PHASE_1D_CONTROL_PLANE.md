@@ -18,14 +18,14 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 | 4 | PR template | configured | `.github/pull_request_template.md` 已实现，等待 PR 页面展示验证。 |
 | 5 | Codex task Issue template | configured | `.github/ISSUE_TEMPLATE/codex-task.yml` 和 `config.yml` 已实现。 |
 | 6 | CODEOWNERS | configured | `.github/CODEOWNERS` 由 `@Mxx1233` 覆盖全仓库和高风险路径；Ruleset 尚未强制 owner review。 |
-| 7 | GitHub Actions CI | partially_configured | 只读 `CI` workflow 已在 Phase 1D-B 任务分支实现，等待 PR 首次运行和 Ruleset 验证。 |
-| 8 | Python lint / format | partially_configured | Ruff compile/lint/format 门禁已实现；4 个既有格式文件暂被精确排除并已记录技术债务。 |
+| 7 | GitHub Actions CI | configured | 只读 `CI` workflow 的五个 job 已在 PR #7 运行通过；汇总 gate 已设为唯一 required check。 |
+| 8 | Python lint / format | configured | Ruff compile/lint/format 门禁已运行通过；4 个既有格式文件被精确排除并已记录技术债务。 |
 | 9 | unit and API tests in CI | partially_configured | 21 项默认测试已接入 CI；独立 API 测试尚未增加。 |
-| 10 | Alembic check in CI | partially_configured | CI job 已实现 heads/current/check，等待 GitHub 实际运行。 |
-| 11 | migration upgrade test in CI | partially_configured | 临时 PostgreSQL upgrade 和隔离 integration job 已实现，等待 GitHub 实际运行。 |
+| 10 | Alembic check in CI | configured | PR #7 的临时 PostgreSQL job 已通过 heads/current/check。 |
+| 11 | migration upgrade test in CI | configured | PR #7 已通过临时 PostgreSQL 空库 upgrade 和隔离 integration test。 |
 | 12 | destructive migration scan | not_configured | 无自动扫描规则或脚本。 |
-| 13 | Docker image build in CI | partially_configured | CI 只构建本地 runner 镜像，不登录 registry 或 push，等待实际运行。 |
-| 14 | docker compose config check | partially_configured | CI 使用临时安全 `.env` 验证 Compose，等待实际运行。 |
+| 13 | Docker image build in CI | configured | PR #7 的本地 runner 镜像构建通过，未登录 registry 或 push。 |
+| 14 | docker compose config check | configured | PR #7 使用临时安全 `.env` 完成 Compose config 验证。 |
 | 15 | secret scanning | not_configured | 无仓库工作流；GitHub 网页 secret scanning 设置无法验证。 |
 | 16 | Codex Cloud GitHub connection | cannot_verify | 只能在 Codex Cloud/GitHub 网页确认。 |
 | 17 | Codex Cloud repository permission | cannot_verify | 只能在 Codex Cloud/GitHub App 权限页确认。 |
@@ -58,9 +58,9 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ### Phase 1D-B：GitHub Actions CI
 
-- 当前状态：`implemented_pending_verification`。
+- 当前状态：`accepted`。
 - 实施：增加固定权限和固定版本的 workflow，覆盖语法、format、lint、单元/API 测试、Alembic drift、空库 upgrade、破坏性 migration 扫描、Docker build、Compose config 和 secret scan。
-- 验收：`CI / Quality`、`CI / Unit Tests`、`CI / PostgreSQL Integration` 和 `CI / Docker Build` 全部通过；汇总的 `CI / Quality Gate` 只在四项成功时通过，并由 Ruleset 设为唯一 required check。当前单 PR 方案不包含独立 API、secret 或破坏性 migration 自动扫描，这些审计项不得提前标为 `configured`。
+- 验收：`CI / Quality`、`CI / Unit Tests`、`CI / PostgreSQL Integration` 和 `CI / Docker Build` 全部通过；汇总的 `CI / Quality Gate` 只在四项成功时通过，并已由 Ruleset 设为唯一 required check。临时失败 commit `d832430` 使 quality 和 gate 失败、PR 状态变为 `unstable`；普通修复 commit `911ef67` 恢复后五项全绿。当前单 PR 方案不包含独立 API、secret 或破坏性 migration 自动扫描，这些审计项不得标为 `configured`。
 
 ### Phase 1D-C：Codex Cloud
 
@@ -107,7 +107,7 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 ## 推荐实施顺序
 
 1. Phase 1D-A：已验收 GitHub 变更治理和保护边界。
-2. Phase 1D-B：正在实施；让 PR 具备可强制执行的单一汇总质量门禁，等待 Actions 和 Ruleset 验证。
+2. Phase 1D-B：已验收；PR 已具备可强制执行并验证过失败路径的单一汇总质量门禁。
 3. Phase 1D-C：让 Codex Cloud 在相同治理和 CI 下完成最小权限验证。
 4. Phase 1D-D：建立与 Production 隔离的验证目标。
 5. Phase 1D-E：在明确 PR、CI、Staging 状态后建立飞书监督审批。
@@ -115,4 +115,4 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 2A 保持 `not_started`；完整 
 
 ## 最小可执行的下一个任务
 
-完成 Phase 1D-B 首次 CI 后等待用户配置并验证 `CI / Quality Gate`；不得自动合并、进入 Phase 1D-C 或进入 Phase 2A。
+等待用户手动 Squash and merge Phase 1D-B PR；不得自动合并、进入 Phase 1D-C 或进入 Phase 2A。
