@@ -16,6 +16,7 @@ from app.services.feishu_authorization import (
     authorize_feishu_message,
     identifier_fingerprint,
 )
+from app.services.feishu_replies import recorded_reply
 
 
 logging.basicConfig(
@@ -183,7 +184,7 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
 
             reply_text(
                 message_id,
-                f"已记录：{text_content}",
+                recorded_reply(),
             )
         else:
             reply_text(
