@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,8 @@ class Settings(BaseSettings):
     feishu_allowed_tenant_keys: str = ""
     feishu_allowed_open_ids: str = ""
     feishu_allowed_chat_types: str = "p2p"
+    feishu_reply_max_attempts: int = Field(default=3, ge=1, le=5)
+    feishu_reply_backoff_seconds: float = Field(default=0.5, ge=0, le=30)
 
     app_env: str = "development"
     app_timezone: str = "Europe/Berlin"
