@@ -2,7 +2,7 @@
 
 ## Validation status
 
-Phase 1D-C is `implemented_pending_verification`. The repository-side documentation and task-branch workflow are implemented, while publication of the validation Pull Request and its required check remain the final verification boundary. Phase 1D remains `in_progress`; this work does not enter Phase 1D-D or Phase 2A.
+Phase 1D-C is `implemented_pending_verification`. The repository workflow has been published from branch `codex/implement-phase-1d-c-codex-cloud-validation` in Pull Request #8. Final verification remains blocked on the required status check because of an external GitHub-hosted runner outage. Phase 1D remains `in_progress`; this work does not enter Phase 1D-D or Phase 2A.
 
 ## GitHub connection and repository scope
 
@@ -27,6 +27,12 @@ A successful read-only Codex Cloud validation task:
 
 The zero-diff result demonstrates that Codex Cloud can read the repository instructions without making an unrequested change. It does not grant permission to bypass the task-branch, Pull Request, CI, or review workflow.
 
+## Publication and CI evidence
+
+Codex Cloud successfully published branch `codex/implement-phase-1d-c-codex-cloud-validation` and created Pull Request #8 targeting `main`. CI was manually triggered for that Pull Request. `CI / PostgreSQL Integration` and `CI / Docker Build` completed successfully, while `CI / Quality` and `CI / Unit Tests` could not obtain GitHub-hosted runners during an external GitHub Actions service outage. Consequently, the required `CI / Quality Gate` remains blocked.
+
+Documentation-only Pull Requests are still governed by the required `CI / Quality Gate`. No CI requirement has been bypassed, and Pull Request #8 must not be approved or merged by Codex Cloud. Final Phase 1D-C acceptance waits for GitHub Actions service recovery, a conclusive required-check result, and manual review.
+
 ## Existing governance boundaries
 
 The existing GitHub governance remains authoritative:
@@ -42,6 +48,6 @@ The broader control-plane status and remaining boundaries are documented in [Pha
 
 ## Verification and rollback
 
-Phase 1D-C becomes eligible for manual acceptance only after its task branch and Pull Request are published through the authorized GitHub integration, the Pull Request uses the existing governance workflow, and the required `CI / Quality Gate` result is available for manual review. Publication and CI verification do not authorize automatic approval or merge.
+Phase 1D-C becomes eligible for manual acceptance only after GitHub Actions service recovery and a successful required `CI / Quality Gate` result on Pull Request #8 are available for manual review. The completed publication and partial CI results do not authorize automatic approval or merge.
 
 This phase changes documentation only. Rollback is a normal Git revert of the documentation commit; no database, migration, application, Docker Compose, GitHub Actions, production, or Feishu rollback is required.

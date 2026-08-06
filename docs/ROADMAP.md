@@ -47,7 +47,7 @@
 ### Phase 1D-C：Codex Cloud
 
 - 目标：连接仓库、读取开发规则、建立无生产密钥的非生产环境，并完成只读任务、测试分支和测试 PR。
-- 当前状态：`implemented_pending_verification`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access 且不含 Secrets 或生产凭据，只读验证成功并保持 zero file diff；等待本任务 PR 的 CI 和人工验收，不得进入 Phase 1D-D。
+- 当前状态：`implemented_pending_verification`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据，只读验证成功并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 和 Pull Request #8 已成功发布；CI 已手动触发，PostgreSQL Integration 与 Docker Build 成功，Quality 与 Unit Tests 因外部 GitHub-hosted runner outage 无法取得 runner，required `CI / Quality Gate` 保持 blocked。没有绕过门禁；最终验收等待 GitHub Actions 服务恢复，不得进入 Phase 1D-D。
 - 详细边界：[Codex Cloud repository workflow](CODEX_CLOUD.md)。
 
 ### Phase 1D-D：Staging

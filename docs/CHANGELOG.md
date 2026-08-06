@@ -19,6 +19,7 @@
 ### Added
 
 - Phase 1D-C Codex Cloud repository workflow 文档：GitHub 连接仅限 `Mxx1233/Maoxx-OS`，Cloud 环境为无 Secrets 或生产凭据且禁用 agent internet access 的非生产环境；成功的只读验证保持 zero file diff。
+- Phase 1D-C Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建。CI 已手动触发：PostgreSQL Integration 和 Docker Build 成功，Quality 和 Unit Tests 因外部 GitHub-hosted runner outage 无法取得 runner，required `CI / Quality Gate` 保持 blocked；未绕过任何 CI 要求。
 - Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
 - GitHub 开发治理、main Ruleset、任务分支、PR 和 migration 人工审查规则。
 - Phase 1D-B 只读 GitHub Actions workflow：Python compile、Ruff、标准库测试、临时 PostgreSQL migration/integration、Compose config、Docker build 和统一 `CI / Quality Gate`。
@@ -27,6 +28,7 @@
 ### Changed
 
 - Phase 1D-A 和 Phase 1D-B 为 `accepted`，Phase 1D-C 为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+- 文档-only Pull Request 同样受 required `CI / Quality Gate` 治理；Phase 1D-C 最终验收等待 GitHub Actions 服务恢复、required check 得出结论和人工审查。
 
 ### Known issues
 

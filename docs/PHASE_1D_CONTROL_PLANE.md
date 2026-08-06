@@ -31,8 +31,8 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A 和 Phase 1D-B 为 `accepted
 | 17 | Codex Cloud repository permission | configured | Repository access 限于 `Mxx1233/Maoxx-OS`，不授权其他仓库或 Production 资源。 |
 | 18 | Codex Cloud environment | configured | 使用无 Secrets、无生产凭据的非生产 Cloud 环境；agent internet access disabled。 |
 | 19 | Codex Cloud read-only validation task | configured | 只读任务成功读取 `AGENTS.md` 和强制文档，结果为 zero file diff。 |
-| 20 | Codex Cloud test branch | configured | Phase 1D-C 使用单一任务分支 `test/phase-1d-c-codex-cloud`，不直接写 `main`。 |
-| 21 | Codex Cloud test Pull Request | partially_configured | 本任务使用单一 PR 验证既有治理；等待发布、CI 和人工验收，不自动批准或合并。 |
+| 20 | Codex Cloud test branch | configured | Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，不直接写 `main`。 |
+| 21 | Codex Cloud test Pull Request | configured | Pull Request #8 已成功创建并指向 `main`；仍受 required `CI / Quality Gate` 和人工审查约束。 |
 | 22 | Staging environment | not_configured | 当前只有 Production Compose 运行环境。 |
 | 23 | staging database isolation | not_configured | 无独立 Staging 数据库配置。 |
 | 24 | staging storage isolation | not_configured | 无独立 Staging storage 配置。 |
@@ -65,8 +65,8 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A 和 Phase 1D-B 为 `accepted
 ### Phase 1D-C：Codex Cloud
 
 - 当前状态：`implemented_pending_verification`。
-- 实施：Codex Cloud GitHub 连接仅授权 `Mxx1233/Maoxx-OS`；非生产 Cloud 环境禁用 agent internet access，且不含 Secrets 或生产凭据。成功的只读任务读取了 `AGENTS.md` 和强制文档并保持 zero file diff。本任务使用单一测试分支和 Pull Request。
-- 验收：等待本任务 PR 的 `CI / Quality Gate` 结果和用户人工验收；Codex 不直接写 main，不自动批准或合并，也不访问 Production。详细记录见 [Codex Cloud repository workflow](CODEX_CLOUD.md)。
+- 实施：Codex Cloud GitHub 连接仅授权 `Mxx1233/Maoxx-OS`；非生产 Cloud 环境禁用 agent internet access，Secrets 为 none，且不含生产凭据。成功的只读任务读取了 `AGENTS.md` 和强制文档并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建。
+- 验收：PR #8 已手动触发 CI；`CI / PostgreSQL Integration` 和 `CI / Docker Build` 成功，`CI / Quality` 和 `CI / Unit Tests` 因外部 GitHub-hosted runner outage 无法取得 runner，required `CI / Quality Gate` 因此保持 blocked。文档 PR 同样必须通过 required gate；未绕过任何 CI 要求。最终验收等待 GitHub Actions 服务恢复、required check 得出结论和用户人工审查；Codex 不自动批准或合并，也不访问 Production。详细记录见 [Codex Cloud repository workflow](CODEX_CLOUD.md)。
 
 ### Phase 1D-D：Staging
 
@@ -98,7 +98,7 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A 和 Phase 1D-B 为 `accepted
 ## 需要用户手动完成的网页操作
 
 1. GitHub：Public 仓库和 main Ruleset 已配置；`CI / Quality Gate` 是唯一 required status check。后续若评审 CODEOWNERS review、required approvals、secret scanning 或 Push Protection，不得把生产 Secret 放入 Actions。
-2. Codex Cloud：等待 Phase 1D-C 单一测试 PR 的 CI 和人工验收；不得自动批准或合并。
+2. Codex Cloud：PR #8 已创建；等待 GitHub Actions hosted-runner 服务恢复、required `CI / Quality Gate` 和人工验收，不得绕过门禁、自动批准或合并。
 3. Feishu：审批后续应用权限、事件/卡片配置及真实允许/拒绝/重复审批验收。
 4. Production：在受控部署设计评审后确认审批人、备份位置、维护窗口和回滚责任人。
 
@@ -113,4 +113,4 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A 和 Phase 1D-B 为 `accepted
 
 ## 最小可执行的下一个任务
 
-发布 Phase 1D-C 的单一任务 Pull Request，等待 `CI / Quality Gate` 和用户人工验收；不得自动批准或合并，不得进入 Phase 1D-D 或 Phase 2A。
+等待 GitHub Actions hosted-runner 服务恢复后完成 PR #8 的 required `CI / Quality Gate`，再由用户人工验收；不得绕过门禁、自动批准或合并，不得进入 Phase 1D-D 或 Phase 2A。
