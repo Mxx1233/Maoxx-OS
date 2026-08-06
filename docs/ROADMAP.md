@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 和 Phase 1D-B 已验收；不得自动进入后续子阶段。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 和 Phase 1D-B 为 `accepted`，Phase 1D-C 为 `implemented_pending_verification`；不得进入 Phase 1D-D 或 Phase 2A。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -41,12 +41,14 @@
 
 ### Phase 1D-B：GitHub Actions CI
 
-- 目标：Python 语法、format、lint、单元/API 测试、Alembic check、migration upgrade、Docker build、Compose config、secret scan 和破坏性 migration scan。
+- 目标：Python 语法、format、lint、默认单元测试、Alembic check、migration upgrade、Docker build、Compose config 和统一质量门禁；独立 API 测试、secret scanning 和破坏性 migration scanning 尚未配置。
 - 当前状态：`accepted`；五个 job 已通过，`CI / Quality Gate` 是唯一 required check，且临时失败 commit 已证明失败门禁会阻止 PR 合并。
 
 ### Phase 1D-C：Codex Cloud
 
 - 目标：连接仓库、读取开发规则、建立无生产密钥的非生产环境，并完成只读任务、测试分支和测试 PR。
+- 当前状态：`implemented_pending_verification`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access 且不含 Secrets 或生产凭据，只读验证成功并保持 zero file diff；等待本任务 PR 的 CI 和人工验收，不得进入 Phase 1D-D。
+- 详细边界：[Codex Cloud repository workflow](CODEX_CLOUD.md)。
 
 ### Phase 1D-D：Staging
 
