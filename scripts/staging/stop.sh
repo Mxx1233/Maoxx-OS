@@ -13,8 +13,8 @@ head_sha="$(git -C "$STAGING_ROOT" rev-parse HEAD)"
 require_sha "$head_sha"
 export STAGING_API_IMAGE="maoxx-os-staging-api:${head_sha}"
 while IFS= read -r id; do
-  [[ "$(docker inspect --format '{{.Config.Labels.com.docker.compose.project}}' "$id")" == "$STAGING_PROJECT" ]] || die "unexpected project label"
-  service="$(docker inspect --format '{{.Config.Labels.com.docker.compose.service}}' "$id")"
+  require_container_compose_label "$id" com.docker.compose.project "$STAGING_PROJECT" "project"
+  service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$id")"
   case "$service" in db|api|feishu-worker) ;; *) die "unexpected staging service label";; esac
 done <<< "$ids"
 "${COMPOSE[@]}" down

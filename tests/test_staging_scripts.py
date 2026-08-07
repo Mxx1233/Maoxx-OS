@@ -155,6 +155,64 @@ class StagingScriptTests(unittest.TestCase):
         self.assertRegex(stop, re.escape('"${COMPOSE[@]}" down'))
         self.assertNotIn("--remove-orphans", stop)
 
+    def test_compose_labels_use_exact_dotted_map_key_lookup(self) -> None:
+        combined = "\n".join(script.read_text() for script in SCRIPTS)
+        self.assertNotIn(".Config.Labels.com.docker.compose", combined)
+        self.assertIn(
+            '{{index .Config.Labels "com.docker.compose.service"}}',
+            (ROOT / "scripts/staging/stop.sh").read_text(),
+        )
+
+        for key, expected in (
+            ("com.docker.compose.project", "maoxx-staging"),
+            ("com.docker.compose.service", "api"),
+        ):
+            with (
+                self.subTest(key=key),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                fake_bin = Path(directory) / "bin"
+                fake_bin.mkdir()
+                log = Path(directory) / "docker.log"
+                docker = fake_bin / "docker"
+                docker.write_text(
+                    "#!/usr/bin/env bash\n"
+                    'printf \'%s\\n\' "$*" > "$STAGING_TEST_LOG"\n'
+                    "printf '%s\\n' \"${STAGING_FAKE_LABEL_VALUE:-}\"\n"
+                )
+                docker.chmod(0o755)
+                command = (
+                    'require_container_compose_label container-id "$LABEL_KEY" '
+                    '"$EXPECTED_LABEL" test'
+                )
+                base_env = {
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    "STAGING_TEST_LOG": str(log),
+                    "LABEL_KEY": key,
+                    "EXPECTED_LABEL": expected,
+                }
+
+                passed = self.run_lib(
+                    command,
+                    env={**base_env, "STAGING_FAKE_LABEL_VALUE": expected},
+                )
+                self.assertEqual(passed.returncode, 0, passed.stderr)
+                self.assertIn(
+                    f'--format {{{{index .Config.Labels "{key}"}}}}',
+                    log.read_text(),
+                )
+
+                wrong = self.run_lib(
+                    command,
+                    env={**base_env, "STAGING_FAKE_LABEL_VALUE": "wrong"},
+                )
+                self.assertNotEqual(wrong.returncode, 0)
+                self.assertIn("wrong test label", wrong.stderr)
+
+                missing = self.run_lib(command, env=base_env)
+                self.assertNotEqual(missing.returncode, 0)
+                self.assertIn("wrong test label", missing.stderr)
+
     def test_approved_checkout_requires_matching_clean_head(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
