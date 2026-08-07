@@ -32,6 +32,7 @@
 - 默认 Staging 不启动 Feishu Worker；测试 profile 也只能使用禁用值或独立测试凭据。
 - Staging 失败处理保留数据库 volume，不执行 downgrade、prune 或数据删除。首次部署需要独立人工批准。
 - 批准 SHA、当前 HEAD、完整 clean worktree、关键部署路径和最新成功 CI 必须同时匹配后才能 build；脚本不得在运行中切换或清理 checkout。首次 Docker mutation 前必须注册仅针对精确 `maoxx-staging` project labels 的普通 `down` 失败清理。
+- 镜像 build context 必须由批准 SHA 的 Git object archive 生成，不得直接使用 mutable checkout。archive 只包含必需 tracked inputs，拒绝 symlink，不包含 `.git`、`.env.staging`、`storage/` 或 ignored/untracked 文件，并在成功或失败时清理。
 
 ## AI 代理规则
 

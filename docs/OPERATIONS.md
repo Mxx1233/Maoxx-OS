@@ -110,6 +110,8 @@ Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [P
 
 部署操作者必须先把固定 checkout 明确置于批准 SHA，并保持 `git status --porcelain` 完全为空；部署脚本只验证，不执行 checkout、reset 或 clean。部分 `compose up` 失败由预先注册的精确 project-label 清理处理，仅执行普通 `down` 并保留数据库 volume。
 
+Docker build 只使用批准 SHA 的 `git archive` 临时 context 和其中的 Dockerfile，不使用 `/opt/maoxx-os-staging` 作为 build context。临时 context 只包含镜像所需 tracked paths，设为只读并由 EXIT trap 清理；不要手工复制工作树内容到该目录。
+
 ## Worker 回复策略
 
 - 成功回复不重试。

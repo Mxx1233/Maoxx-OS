@@ -38,6 +38,69 @@ require_approved_checkout() {
   done
 }
 
+remove_approved_build_context() {
+  local context="${1:-}" temp_root canonical
+  [[ -n "$context" && -e "$context" ]] || return 0
+  temp_root="$(realpath -e -- "${TMPDIR:-/tmp}")" || return 1
+  canonical="$(realpath -e -- "$context")" || return 1
+  [[ "$(dirname -- "$canonical")" == "$temp_root" && "$(basename -- "$canonical")" =~ ^maoxx-staging-approved\.[A-Za-z0-9]+$ ]] || {
+    info "refusing to remove unexpected build context path"
+    return 1
+  }
+  [[ -d "$canonical" && ! -L "$context" ]] || {
+    info "refusing to remove non-directory build context"
+    return 1
+  }
+  chmod -R u+w -- "$canonical"
+  rm -rf -- "$canonical"
+}
+
+create_approved_build_context() {
+  local target_sha="$1" root="${2:-$STAGING_ROOT}" context path
+  local -a required_files=(Dockerfile alembic.ini requirements.txt)
+  local -a required_directories=(app alembic)
+  require_sha "$target_sha"
+  context="$(mktemp -d "${TMPDIR:-/tmp}/maoxx-staging-approved.XXXXXXXXXX")"
+  if ! git -C "$root" archive --format=tar "$target_sha" -- Dockerfile app alembic alembic.ini requirements.txt \
+    | tar --extract --file=- --directory="$context" --no-same-owner --no-same-permissions; then
+    remove_approved_build_context "$context"
+    die "failed to create approved Git build context"
+  fi
+  for path in "${required_files[@]}"; do
+    [[ -f "$context/$path" && ! -L "$context/$path" ]] || {
+      remove_approved_build_context "$context"
+      die "approved build context is missing required file: $path"
+    }
+  done
+  for path in "${required_directories[@]}"; do
+    [[ -d "$context/$path" && ! -L "$context/$path" ]] || {
+      remove_approved_build_context "$context"
+      die "approved build context is missing required directory: $path"
+    }
+  done
+  [[ ! -e "$context/.git" && ! -e "$context/.env.staging" && ! -e "$context/storage" ]] || {
+    remove_approved_build_context "$context"
+    die "forbidden path entered approved build context"
+  }
+  [[ -z "$(find "$context" -type l -print -quit)" ]] || {
+    remove_approved_build_context "$context"
+    die "symlinks are forbidden in approved build context"
+  }
+  if ! chmod -R a-w -- "$context"; then
+    remove_approved_build_context "$context"
+    die "failed to make approved build context read-only"
+  fi
+  info "approved Git build context created for ${target_sha}"
+  printf '%s\n' "$context"
+}
+
+build_approved_image() {
+  local context="$1" image="$2"
+  [[ -d "$context" && ! -L "$context" ]] || die "approved build context is unavailable"
+  [[ -f "$context/Dockerfile" && ! -L "$context/Dockerfile" ]] || die "approved Dockerfile is unavailable"
+  docker build --file "$context/Dockerfile" --tag "$image" "$context"
+}
+
 reject_polluted_environment() {
   local name
   while IFS='=' read -r name _; do
@@ -49,13 +112,13 @@ reject_polluted_environment() {
 }
 
 validate_env_file() {
-  local file="$1" owner mode links key value
+  local file="$1" root="${2:-$STAGING_ROOT}" owner mode links key value
   local -A values=()
   [[ -f "$file" && ! -L "$file" ]] || die "environment file must be a regular non-symlink"
   links="$(stat -c '%h' -- "$file")"; [[ "$links" == 1 ]] || die "environment file must not be hard-linked"
   owner="$(stat -c '%u' -- "$file")"; [[ "$owner" == "$(id -u)" || "$owner" == 0 ]] || die "invalid environment file owner"
   mode="$(stat -c '%a' -- "$file")"; [[ "$mode" == 600 ]] || die "environment file mode must be 0600"
-  git -C "$STAGING_ROOT" ls-files --error-unmatch .env.staging >/dev/null 2>&1 && die ".env.staging must not be tracked"
+  git -C "$root" ls-files --error-unmatch "$(realpath --relative-to="$root" "$file")" >/dev/null 2>&1 && die ".env.staging must not be tracked"
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
     [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=([^[:cntrl:]]*)$ ]] || die "invalid non-executable env-file syntax"
@@ -95,16 +158,31 @@ require_no_staging_containers() {
 }
 
 staging_project_resources_exist() {
-  [[ -n "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
-  [[ -n "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
-  [[ -n "$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
+  local containers networks volumes
+  containers="$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || {
+    info "failed to query staging containers"
+    return 2
+  }
+  networks="$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || {
+    info "failed to query staging networks"
+    return 2
+  }
+  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || {
+    info "failed to query staging volumes"
+    return 2
+  }
+  [[ -n "$containers" || -n "$networks" || -n "$volumes" ]] && return 0
   return 1
 }
 
 safe_compose_down_if_present() {
+  local status
   if staging_project_resources_exist; then
     info "cleaning up failed staging mutation; PostgreSQL volume will be retained"
     "${COMPOSE[@]}" down
+  else
+    status="$?"
+    (( status == 1 )) || return "$status"
   fi
 }
 

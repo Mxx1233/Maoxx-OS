@@ -40,11 +40,17 @@ class StagingScriptTests(unittest.TestCase):
             "alembic/versions/0001.py",
             "alembic.ini",
             "requirements.txt",
+            ".gitignore",
         )
         for name in files:
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"fixture for {name}\n")
+            if name == ".gitignore":
+                path.write_text(
+                    "*.sql\n*.dump\n*.staging.local\n.env.staging\nstorage/\n"
+                )
+            else:
+                path.write_text(f"fixture for {name}\n")
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "add", "."], cwd=root, check=True)
         subprocess.run(
@@ -109,8 +115,13 @@ class StagingScriptTests(unittest.TestCase):
         )
         self.assertLess(
             deploy.index('require_approved_checkout "$target_sha"'),
-            deploy.index('docker build --tag "$image"'),
+            deploy.index('approved_context="$(create_approved_build_context'),
         )
+        self.assertLess(
+            deploy.index('approved_context="$(create_approved_build_context'),
+            deploy.index('build_approved_image "$approved_context" "$image"'),
+        )
+        self.assertNotIn('docker build --tag "$image" "$STAGING_ROOT"', deploy)
         for path in (
             "scripts/staging/deploy.sh",
             "scripts/staging/lib.sh",
@@ -181,50 +192,232 @@ class StagingScriptTests(unittest.TestCase):
             self.assertIn("completely clean", untracked.stderr)
 
     def test_partial_compose_up_failure_runs_safe_down(self) -> None:
+        for resource in ("container", "network", "volume"):
+            with (
+                self.subTest(resource=resource),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                fake_bin = root / "bin"
+                fake_bin.mkdir()
+                log = root / "docker.log"
+                docker = fake_bin / "docker"
+                docker.write_text(
+                    "#!/usr/bin/env bash\n"
+                    'printf \'%s\\n\' "$*" >> "$STAGING_TEST_LOG"\n'
+                    'case "$*" in\n'
+                    "  'ps -aq --filter label=com.docker.compose.project=maoxx-staging') [[ \"$STAGING_FAKE_RESOURCE\" != container ]] || echo partial-container; exit 0 ;;\n"
+                    "  'network ls -q --filter label=com.docker.compose.project=maoxx-staging') [[ \"$STAGING_FAKE_RESOURCE\" != network ]] || echo partial-network; exit 0 ;;\n"
+                    "  'volume ls -q --filter label=com.docker.compose.project=maoxx-staging') [[ \"$STAGING_FAKE_RESOURCE\" != volume ]] || echo partial-volume; exit 0 ;;\n"
+                    "  *' up -d db') exit 17 ;;\n"
+                    "  *' down') exit 0 ;;\n"
+                    "esac\n"
+                )
+                docker.chmod(0o755)
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        f'source "{ROOT / "scripts/staging/deploy.sh"}"; '
+                        "arm_deploy_cleanup; start_staging_db",
+                    ],
+                    env={
+                        **os.environ,
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                        "STAGING_TEST_LOG": str(log),
+                        "STAGING_FAKE_RESOURCE": resource,
+                    },
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 17)
+                calls = log.read_text().splitlines()
+                self.assertTrue(
+                    any(call.endswith(" up -d db") for call in calls)
+                )
+                self.assertTrue(any(call.endswith(" down") for call in calls))
+                combined = " ".join(calls)
+                for forbidden in (
+                    " -v",
+                    "--volumes",
+                    "--remove-orphans",
+                    "volume rm",
+                    "prune",
+                ):
+                    self.assertNotIn(forbidden, combined)
+
+    def test_staging_resource_query_failure_is_not_silent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            fake_bin = root / "bin"
+            fake_bin = Path(directory) / "bin"
             fake_bin.mkdir()
-            log = root / "docker.log"
+            docker = fake_bin / "docker"
+            docker.write_text(
+                '#!/usr/bin/env bash\nif [[ "$1" == ps ]]; then exit 23; fi\n'
+            )
+            docker.chmod(0o755)
+            result = self.run_lib(
+                "staging_project_resources_exist",
+                env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("failed to query staging containers", result.stderr)
+
+    def test_approved_git_archive_excludes_mutable_inputs_and_drives_build(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo = base / "repo"
+            temp_root = base / "tmp"
+            fake_bin = base / "bin"
+            repo.mkdir()
+            temp_root.mkdir()
+            fake_bin.mkdir()
+            target = self.make_critical_git_tree(repo)
+            original_dockerfile = (repo / "Dockerfile").read_text()
+            for name in (
+                "app/injected.sql",
+                "alembic/private.dump",
+                "app/config.staging.local",
+                ".env.staging",
+                "storage/untracked.bin",
+            ):
+                path = repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("ignored mutable input\n")
+            clean = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(clean.stdout, "")
+            validated = self.run_lib(
+                'require_approved_checkout "$TARGET_SHA" "$TEST_ROOT"',
+                env={"TARGET_SHA": target, "TEST_ROOT": str(repo)},
+            )
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            created = self.run_lib(
+                'create_approved_build_context "$TARGET_SHA" "$TEST_ROOT"',
+                env={
+                    "TARGET_SHA": target,
+                    "TEST_ROOT": str(repo),
+                    "TMPDIR": str(temp_root),
+                },
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+            context = Path(created.stdout.strip())
+            self.assertTrue(context.is_dir())
+            self.assertEqual(context.stat().st_mode & 0o222, 0)
+            for name in (
+                "Dockerfile",
+                "app",
+                "alembic",
+                "alembic.ini",
+                "requirements.txt",
+            ):
+                self.assertTrue((context / name).exists(), name)
+            for name in (
+                ".git",
+                ".env.staging",
+                "storage",
+                "app/injected.sql",
+                "alembic/private.dump",
+                "app/config.staging.local",
+            ):
+                self.assertFalse((context / name).exists(), name)
+
+            (repo / "Dockerfile").write_text("mutated after validation\n")
+            self.assertEqual(
+                (context / "Dockerfile").read_text(), original_dockerfile
+            )
+            log = base / "docker.log"
             docker = fake_bin / "docker"
             docker.write_text(
                 "#!/usr/bin/env bash\n"
-                'printf \'%s\\n\' "$*" >> "$STAGING_TEST_LOG"\n'
-                'case "$*" in\n'
-                "  'ps -aq --filter label=com.docker.compose.project=maoxx-staging') echo partial-container ;;\n"
-                "  *' up -d db') exit 17 ;;\n"
-                "  *' down') exit 0 ;;\n"
-                "esac\n"
+                'printf \'%s\\n\' "$*" > "$STAGING_TEST_LOG"\n'
             )
+            docker.chmod(0o755)
+            built = self.run_lib(
+                'build_approved_image "$CONTEXT" "maoxx-os-staging-api:$TARGET_SHA"',
+                env={
+                    "CONTEXT": str(context),
+                    "TARGET_SHA": target,
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    "STAGING_TEST_LOG": str(log),
+                },
+            )
+            self.assertEqual(built.returncode, 0, built.stderr)
+            build_args = log.read_text().strip()
+            self.assertIn(f"--file {context}/Dockerfile", build_args)
+            self.assertTrue(build_args.endswith(str(context)))
+            self.assertNotIn("/opt/maoxx-os-staging", build_args)
+
+            removed = self.run_lib(
+                'remove_approved_build_context "$CONTEXT"',
+                env={"CONTEXT": str(context), "TMPDIR": str(temp_root)},
+            )
+            self.assertEqual(removed.returncode, 0, removed.stderr)
+            self.assertFalse(context.exists())
+
+    def test_approved_context_is_cleaned_when_build_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo = base / "repo"
+            temp_root = base / "tmp"
+            fake_bin = base / "bin"
+            repo.mkdir()
+            temp_root.mkdir()
+            fake_bin.mkdir()
+            target = self.make_critical_git_tree(repo)
+            docker = fake_bin / "docker"
+            docker.write_text("#!/usr/bin/env bash\nexit 19\n")
             docker.chmod(0o755)
             result = subprocess.run(
                 [
                     "bash",
                     "-c",
                     f'source "{ROOT / "scripts/staging/deploy.sh"}"; '
-                    "arm_deploy_cleanup; start_staging_db",
+                    'approved_context="$(create_approved_build_context "$TARGET_SHA" "$TEST_ROOT")"; '
+                    "arm_deploy_cleanup; "
+                    'build_approved_image "$approved_context" "maoxx-os-staging-api:$TARGET_SHA"',
                 ],
                 env={
                     **os.environ,
+                    "TARGET_SHA": target,
+                    "TEST_ROOT": str(repo),
+                    "TMPDIR": str(temp_root),
                     "PATH": f"{fake_bin}:{os.environ['PATH']}",
-                    "STAGING_TEST_LOG": str(log),
                 },
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(result.returncode, 17)
-            calls = log.read_text().splitlines()
-            self.assertTrue(any(call.endswith(" up -d db") for call in calls))
-            self.assertTrue(any(call.endswith(" down") for call in calls))
-            combined = " ".join(calls)
-            for forbidden in (
-                " -v",
-                "--volumes",
-                "--remove-orphans",
-                "volume rm",
-                "prune",
+            self.assertEqual(result.returncode, 19)
+            self.assertEqual(list(temp_root.iterdir()), [])
+
+    def test_invalid_staging_database_urls_are_rejected(self) -> None:
+        example = (ROOT / ".env.staging.example").read_text()
+        replacements = (
+            ("@db:5432/", "@production-db:5432/"),
+            ("//maoxx_staging_example:", "//wrong_user:"),
+            ("/maoxx_staging_example\n", "/wrong_database\n"),
+        )
+        for old, new in replacements:
+            with (
+                self.subTest(replacement=new),
+                tempfile.TemporaryDirectory() as directory,
             ):
-                self.assertNotIn(forbidden, combined)
+                root = Path(directory)
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                env_file = root / ".env.staging"
+                env_file.write_text(example.replace(old, new))
+                env_file.chmod(0o600)
+                result = self.run_lib(
+                    'validate_env_file "$ENV_FILE" "$TEST_ROOT"',
+                    env={"ENV_FILE": str(env_file), "TEST_ROOT": str(root)},
+                )
+                self.assertNotEqual(result.returncode, 0)
 
     def test_newer_non_successful_ci_run_rejects_old_success(self) -> None:
         sha = "a" * 40

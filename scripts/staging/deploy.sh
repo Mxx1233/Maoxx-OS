@@ -7,6 +7,7 @@ deploy_succeeded=0
 mutation_attempted=0
 production_before_tmp=""
 production_after_build_tmp=""
+approved_context=""
 
 cleanup_deploy() {
   local status="$?"
@@ -15,6 +16,7 @@ cleanup_deploy() {
   fi
   [[ -z "$production_before_tmp" ]] || rm -f -- "$production_before_tmp"
   [[ -z "$production_after_build_tmp" ]] || rm -f -- "$production_after_build_tmp"
+  [[ -z "$approved_context" ]] || remove_approved_build_context "$approved_context" || info "approved build context cleanup failed"
   return "$status"
 }
 
@@ -38,9 +40,12 @@ main() {
   production_after_build_tmp="$(mktemp)"
   arm_deploy_cleanup
   production_snapshot "$production_before_tmp"
+  approved_context="$(create_approved_build_context "$target_sha")"
   image="maoxx-os-staging-api:${target_sha}"
-  docker build --tag "$image" "$STAGING_ROOT"
+  info "building approved image ${image}"
+  build_approved_image "$approved_context" "$image"
   image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+  info "approved image created: tag=${image} id=${image_id}"
   production_snapshot "$production_after_build_tmp"
   compare_snapshots "$production_before_tmp" "$production_after_build_tmp"
   require_production_healthy

@@ -27,6 +27,8 @@ scripts/staging/stop.sh
 
 批准 SHA 是部署内容的唯一身份。部署前必须 freshly fetch `origin/main`，当前 `HEAD` 必须精确等于完整 40 位批准 SHA，且该 SHA 位于最新 `origin/main` 历史；整个工作树必须没有 tracked 修改或 untracked 文件。脚本不会 checkout、reset、clean 或删除本地文件来修复不一致，而是 fail closed。部署脚本、共享库、preflight/verify/stop、Compose、Dockerfile、应用、Alembic 与 requirements 都必须存在于同一批准 tree，因此镜像 tag `maoxx-os-staging-api:<SHA>` 对应实际执行和构建的内容。
 
+镜像内容不直接读取 mutable checkout。部署从批准 Git object 归档且只提取 `Dockerfile`、`app/`、`alembic/`、`alembic.ini` 和 `requirements.txt` 到唯一 `mktemp -d` context；验证必需文件、拒绝 symlink，并在 build 前将 context 设为只读。Dockerfile 与 context 参数都指向该 archive。`.git`、`.env.staging`、`storage/` 以及所有 ignored/untracked worktree 文件不会进入 context；archive 创建后的 worktree 变化也不能改变镜像输入。context 在成功或失败 EXIT 时安全清理。
+
 第一次 mutating Compose 调用前已注册失败清理。即使 `compose up` 部分创建 container、network 或 volume 后返回非零，EXIT 清理也只用精确 `com.docker.compose.project=maoxx-staging` labels 判断对象并执行普通 Compose `down`；不会使用 `-v`、`--volumes`、`--remove-orphans`、volume 删除、prune 或 downgrade，PostgreSQL volume 保留，Production project 不在清理范围内。
 
 本阶段不启用 Registry，不修改 Production Compose，不部署 Production，不进入 Phase 1D-E、1D-F 或 Phase 2A。只有首次真实隔离部署、migration、健康与 Production 不变量验收完成后，Phase 1D-D 才可由用户标记为 `accepted`。
