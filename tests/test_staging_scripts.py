@@ -249,6 +249,135 @@ class StagingScriptTests(unittest.TestCase):
             self.assertNotEqual(untracked.returncode, 0)
             self.assertIn("completely clean", untracked.stderr)
 
+    def test_valid_predeploy_staging_states_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / "bin"
+            fake_bin.mkdir()
+            docker = fake_bin / "docker"
+            docker.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os\n"
+                "import sys\n"
+                "args = sys.argv[1:]\n"
+                "joined = ' '.join(args)\n"
+                "failure = os.environ.get('STAGING_QUERY_FAILURE', '')\n"
+                "def emit(name):\n"
+                "    value = os.environ.get(name, '')\n"
+                "    if value:\n"
+                "        print(value)\n"
+                "if args[:2] == ['ps', '-aq']:\n"
+                "    sys.exit(23) if failure == 'containers' else emit('STAGING_CONTAINERS')\n"
+                "elif args[:2] == ['network', 'ls']:\n"
+                "    sys.exit(23) if failure == 'networks' else emit('STAGING_NETWORKS')\n"
+                "elif args[:2] == ['volume', 'ls'] and 'label=com.docker.compose.project=maoxx-staging' in joined:\n"
+                "    sys.exit(23) if failure == 'project_volumes' else emit('STAGING_PROJECT_VOLUMES')\n"
+                "elif args[:2] == ['volume', 'ls'] and 'name=^maoxx-staging_' in joined:\n"
+                "    sys.exit(23) if failure == 'named_volumes' else emit('STAGING_NAMED_VOLUMES')\n"
+                "elif args[:2] == ['volume', 'inspect']:\n"
+                "    if failure == 'inspect':\n"
+                "        sys.exit(23)\n"
+                "    if 'com.docker.compose.project' in joined:\n"
+                "        emit('STAGING_PROJECT_LABEL')\n"
+                "    elif 'com.docker.compose.volume' in joined:\n"
+                "        emit('STAGING_VOLUME_LABEL')\n"
+                "    else:\n"
+                "        sys.exit(24)\n"
+                "else:\n"
+                "    sys.exit(24)\n"
+            )
+            docker.chmod(0o755)
+
+            def check(**overrides: str):
+                environment = {
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    "STAGING_CONTAINERS": "",
+                    "STAGING_NETWORKS": "",
+                    "STAGING_PROJECT_VOLUMES": "",
+                    "STAGING_NAMED_VOLUMES": "",
+                    "STAGING_PROJECT_LABEL": "maoxx-staging",
+                    "STAGING_VOLUME_LABEL": "postgres_data",
+                    "STAGING_QUERY_FAILURE": "",
+                    **overrides,
+                }
+                return self.run_lib(
+                    "require_valid_predeploy_staging_state", env=environment
+                )
+
+            clean = check()
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            valid_retained = check(
+                STAGING_PROJECT_VOLUMES="maoxx-staging_postgres_data",
+                STAGING_NAMED_VOLUMES="maoxx-staging_postgres_data",
+            )
+            self.assertEqual(
+                valid_retained.returncode, 0, valid_retained.stderr
+            )
+
+            rejected_states = (
+                ("container", {"STAGING_CONTAINERS": "container-id"}),
+                ("network", {"STAGING_NETWORKS": "network-id"}),
+                (
+                    "two volumes",
+                    {
+                        "STAGING_PROJECT_VOLUMES": "maoxx-staging_postgres_data\nother-volume",
+                        "STAGING_NAMED_VOLUMES": "maoxx-staging_postgres_data",
+                    },
+                ),
+                (
+                    "wrong volume identity",
+                    {
+                        "STAGING_PROJECT_VOLUMES": "maoxx-staging_unknown",
+                        "STAGING_NAMED_VOLUMES": "maoxx-staging_unknown",
+                    },
+                ),
+                (
+                    "wrong project label",
+                    {
+                        "STAGING_PROJECT_VOLUMES": "maoxx-staging_postgres_data",
+                        "STAGING_NAMED_VOLUMES": "maoxx-staging_postgres_data",
+                        "STAGING_PROJECT_LABEL": "wrong-project",
+                    },
+                ),
+                (
+                    "wrong volume label",
+                    {
+                        "STAGING_PROJECT_VOLUMES": "maoxx-staging_postgres_data",
+                        "STAGING_NAMED_VOLUMES": "maoxx-staging_postgres_data",
+                        "STAGING_VOLUME_LABEL": "wrong-volume",
+                    },
+                ),
+                (
+                    "Production volume",
+                    {"STAGING_PROJECT_VOLUMES": "maoxx_postgres_data"},
+                ),
+                (
+                    "unlabeled expected volume",
+                    {"STAGING_NAMED_VOLUMES": "maoxx-staging_postgres_data"},
+                ),
+            )
+            for name, environment in rejected_states:
+                with self.subTest(state=name):
+                    result = check(**environment)
+                    self.assertNotEqual(result.returncode, 0)
+
+            for query in (
+                "containers",
+                "networks",
+                "project_volumes",
+                "named_volumes",
+                "inspect",
+            ):
+                with self.subTest(query_failure=query):
+                    environment = {"STAGING_QUERY_FAILURE": query}
+                    if query == "inspect":
+                        environment.update(
+                            STAGING_PROJECT_VOLUMES="maoxx-staging_postgres_data",
+                            STAGING_NAMED_VOLUMES="maoxx-staging_postgres_data",
+                        )
+                    result = check(**environment)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("failed to", result.stderr)
+
     def test_partial_compose_up_failure_runs_safe_down(self) -> None:
         for resource in ("container", "network", "volume"):
             with (

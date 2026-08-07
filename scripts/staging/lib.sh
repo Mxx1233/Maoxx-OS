@@ -3,6 +3,8 @@ set -euo pipefail
 
 readonly STAGING_ROOT="/opt/maoxx-os-staging"
 readonly STAGING_PROJECT="maoxx-staging"
+readonly STAGING_POSTGRES_VOLUME="${STAGING_PROJECT}_postgres_data"
+readonly STAGING_POSTGRES_VOLUME_LABEL="postgres_data"
 readonly STAGING_ENV_FILE="${STAGING_ROOT}/.env.staging"
 readonly STAGING_COMPOSE_FILE="${STAGING_ROOT}/compose.staging.yml"
 # shellcheck disable=SC2034  # Shared by scripts that source this library.
@@ -160,10 +162,22 @@ require_container_compose_label() {
   actual="$(docker inspect --format "{{index .Config.Labels \"${key}\"}}" "$id")" || die "failed to inspect $description label"
   [[ "$actual" == "$expected" ]] || die "wrong $description label"
 }
-require_no_staging_containers() {
-  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging instance already exists"
-  [[ -z "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging network already exists"
-  [[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging volume already exists"
+require_valid_predeploy_staging_state() {
+  local containers networks project_volumes named_volumes project_label volume_label
+  containers="$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || die "failed to query staging containers"
+  networks="$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || die "failed to query staging networks"
+  project_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" || die "failed to query staging project volumes"
+  named_volumes="$(docker volume ls -q --filter "name=^${STAGING_PROJECT}_")" || die "failed to query staging-named volumes"
+  [[ -z "$containers" ]] || die "a staging container already exists"
+  [[ -z "$networks" ]] || die "a staging network already exists"
+  if [[ -z "$project_volumes" && -z "$named_volumes" ]]; then
+    return 0
+  fi
+  [[ "$project_volumes" == "$STAGING_POSTGRES_VOLUME" && "$named_volumes" == "$STAGING_POSTGRES_VOLUME" ]] || die "unexpected staging volume state"
+  project_label="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' "$STAGING_POSTGRES_VOLUME")" || die "failed to inspect retained staging volume project label"
+  volume_label="$(docker volume inspect --format '{{index .Labels "com.docker.compose.volume"}}' "$STAGING_POSTGRES_VOLUME")" || die "failed to inspect retained staging volume identity label"
+  [[ "$project_label" == "$STAGING_PROJECT" ]] || die "wrong retained staging volume project label"
+  [[ "$volume_label" == "$STAGING_POSTGRES_VOLUME_LABEL" ]] || die "wrong retained staging volume identity label"
 }
 
 staging_project_resources_exist() {

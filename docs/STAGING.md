@@ -31,4 +31,6 @@ scripts/staging/stop.sh
 
 第一次 mutating Compose 调用前已注册失败清理。即使 `compose up` 部分创建 container、network 或 volume 后返回非零，EXIT 清理也只用精确 `com.docker.compose.project=maoxx-staging` labels 判断对象并执行普通 Compose `down`；不会使用 `-v`、`--volumes`、`--remove-orphans`、volume 删除、prune 或 downgrade，PostgreSQL volume 保留，Production project 不在清理范围内。
 
+preflight 只接受两种 fail-closed 资源状态：完全没有 `maoxx-staging` container、network 或 volume 的首次部署状态；或没有 container/network，且唯一 volume 同时具有 Compose project `maoxx-staging`、volume identity `postgres_data` 并精确命名为 `maoxx-staging_postgres_data` 的失败重试状态。额外对象、未知/Production/unlabeled volume、错误 label 或 Docker 查询失败均拒绝。合法 retained volume 由 Compose 自然复用，不删除、重建或手工读取其内容；再次执行 `alembic upgrade head` 用于验证 forward migration 幂等性。
+
 本阶段不启用 Registry，不修改 Production Compose，不部署 Production，不进入 Phase 1D-E、1D-F 或 Phase 2A。只有首次真实隔离部署、migration、健康与 Production 不变量验收完成后，Phase 1D-D 才可由用户标记为 `accepted`。
