@@ -149,7 +149,8 @@ project_container_ids() {
 }
 require_single_container() {
   local ids count
-  ids="$(project_container_ids "$1" "$2")"; count="$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l)"
+  ids="$(project_container_ids "$1" "$2")" || die "failed to query $1/$2 containers"
+  count="$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l)"
   [[ "$count" == 1 ]] || die "expected exactly one $1/$2 container"
   printf '%s\n' "$ids"
 }
@@ -161,6 +162,38 @@ require_container_compose_label() {
   esac
   actual="$(docker inspect --format "{{index .Config.Labels \"${key}\"}}" "$id")" || die "failed to inspect $description label"
   [[ "$actual" == "$expected" ]] || die "wrong $description label"
+}
+normalize_line_set() { sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u; }
+require_exact_line_set() { [[ "$1" == "$2" ]] || die "$3"; }
+collect_container_network_ids() {
+  local id output raw=""
+  (( $# > 0 )) || {
+    info "no containers supplied for network identity collection"
+    return 1
+  }
+  for id in "$@"; do
+    if ! output="$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.NetworkID}}{{println}}{{end}}' "$id")"; then
+      info "failed to inspect container network identities"
+      return 1
+    fi
+    raw+=$'\n'"$output"
+  done
+  printf '%s' "$raw" | normalize_line_set
+}
+collect_container_volume_names() {
+  local id output raw=""
+  (( $# > 0 )) || {
+    info "no containers supplied for volume identity collection"
+    return 1
+  }
+  for id in "$@"; do
+    if ! output="$(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{println}}{{end}}{{end}}' "$id")"; then
+      info "failed to inspect container volume identities"
+      return 1
+    fi
+    raw+=$'\n'"$output"
+  done
+  printf '%s' "$raw" | normalize_line_set
 }
 require_valid_predeploy_staging_state() {
   local containers networks project_volumes named_volumes project_label volume_label

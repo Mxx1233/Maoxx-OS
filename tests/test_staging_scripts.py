@@ -378,6 +378,220 @@ class StagingScriptTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("failed to", result.stderr)
 
+    def test_docker_resource_line_sets_are_normalized_and_strict(self) -> None:
+        verify = (ROOT / "scripts/staging/verify.sh").read_text()
+        self.assertNotIn("mapfile", verify)
+        self.assertEqual(verify.count("| normalize_line_set"), 2)
+        self.assertNotIn("done | normalize_line_set", verify)
+        self.assertIn("collect_container_network_ids", verify)
+        self.assertIn("collect_container_volume_names", verify)
+
+        def exact(input_lines: str, expected: str):
+            return self.run_lib(
+                'actual="$(printf \'%s\' "$LINE_SET_INPUT" | normalize_line_set)"; '
+                "printf '%s' \"$actual\"; "
+                'require_exact_line_set "$actual" "$EXPECTED_LINE_SET" test',
+                env={
+                    "LINE_SET_INPUT": input_lines,
+                    "EXPECTED_LINE_SET": expected,
+                },
+            )
+
+        internal = "maoxx-staging_staging_internal"
+        api = "maoxx-staging_staging_api"
+        expected_api = f"{api}\n{internal}"
+        passing_sets = (
+            ("blank DB records", f"\n{internal}\n\n", internal),
+            (
+                "blank API records",
+                f"\n{internal}\n{api}\n\n",
+                expected_api,
+            ),
+            ("different ordering", f"{internal}\n{api}\n", expected_api),
+            (
+                "duplicate expected network",
+                f"{internal}\n{api}\n{internal}\n",
+                expected_api,
+            ),
+        )
+        for name, input_lines, expected in passing_sets:
+            with self.subTest(valid_set=name):
+                result = exact(input_lines, expected)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
+        rejected_sets = (
+            (
+                "unexpected third network",
+                f"{internal}\n{api}\nother",
+                expected_api,
+            ),
+            ("missing internal network", f"{api}\n", expected_api),
+            ("wrong network name", "wrong-network\n", internal),
+            ("empty-only required set", "\n\n", internal),
+        )
+        for name, input_lines, expected in rejected_sets:
+            with self.subTest(invalid_set=name):
+                result = exact(input_lines, expected)
+                self.assertNotEqual(result.returncode, 0)
+
+        for kind in ("networks", "volumes"):
+            with self.subTest(blank_resource_ids=kind):
+                blank_only = self.run_lib(
+                    'production="$(printf \'%s\' "$PRODUCTION_IDS" | normalize_line_set)"; '
+                    'staging="$(printf \'%s\' "$STAGING_IDS" | normalize_line_set)"; '
+                    'require_disjoint_resource_ids "$RESOURCE_KIND" "$production" "$staging"',
+                    env={
+                        "RESOURCE_KIND": kind,
+                        "PRODUCTION_IDS": "\n\n",
+                        "STAGING_IDS": "\n",
+                    },
+                )
+                self.assertEqual(blank_only.returncode, 0, blank_only.stderr)
+
+                result = self.run_lib(
+                    'production="$(printf \'%s\' "$PRODUCTION_IDS" | normalize_line_set)"; '
+                    'staging="$(printf \'%s\' "$STAGING_IDS" | normalize_line_set)"; '
+                    'require_disjoint_resource_ids "$RESOURCE_KIND" "$production" "$staging"',
+                    env={
+                        "RESOURCE_KIND": kind,
+                        "PRODUCTION_IDS": "\nprod-only\n\n",
+                        "STAGING_IDS": "\nstaging-only\n\n",
+                    },
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+                overlap = self.run_lib(
+                    'production="$(printf \'%s\' "$PRODUCTION_IDS" | normalize_line_set)"; '
+                    'staging="$(printf \'%s\' "$STAGING_IDS" | normalize_line_set)"; '
+                    'require_disjoint_resource_ids "$RESOURCE_KIND" "$production" "$staging"',
+                    env={
+                        "RESOURCE_KIND": kind,
+                        "PRODUCTION_IDS": "\nshared\nprod-only\n",
+                        "STAGING_IDS": "\nstaging-only\nshared\n",
+                    },
+                )
+                self.assertNotEqual(overlap.returncode, 0)
+                self.assertIn("identities overlap", overlap.stderr)
+
+    def test_docker_resource_collectors_fail_closed_per_inspect(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / "bin"
+            fake_bin.mkdir()
+            log = Path(directory) / "docker.log"
+            docker = fake_bin / "docker"
+            docker.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'id="${!#}"\n'
+                'printf \'%s\\n\' "$id" >> "$STAGING_TEST_LOG"\n'
+                'if [[ "$id" == "${STAGING_TEST_FAIL_ID:-}" ]]; then\n'
+                "  exit 23\n"
+                "fi\n"
+                'if [[ "$*" == *NetworkSettings.Networks* ]]; then\n'
+                '  printf \'\\nnet-%s\\nnet-%s\\n\\n\' "$id" "$id"\n'
+                "else\n"
+                '  printf \'\\nvolume-%s\\nvolume-%s\\n\\n\' "$id" "$id"\n'
+                "fi\n"
+            )
+            docker.chmod(0o755)
+            base_env = {
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "STAGING_TEST_LOG": str(log),
+            }
+
+            success_cases = (
+                (
+                    "network",
+                    "collect_container_network_ids first middle final",
+                    "net-final\nnet-first\nnet-middle\n",
+                ),
+                (
+                    "volume",
+                    "collect_container_volume_names first middle final",
+                    "volume-final\nvolume-first\nvolume-middle\n",
+                ),
+            )
+            for name, command, expected in success_cases:
+                with self.subTest(success=name):
+                    log.write_text("")
+                    result = self.run_lib(command, env=base_env)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, expected)
+                    self.assertEqual(
+                        log.read_text().splitlines(),
+                        ["first", "middle", "final"],
+                    )
+
+            failure_cases = (
+                (
+                    "Production network first",
+                    "collect_container_network_ids first middle final",
+                    "first",
+                    ["first"],
+                ),
+                (
+                    "Production network middle",
+                    "collect_container_network_ids first middle final",
+                    "middle",
+                    ["first", "middle"],
+                ),
+                (
+                    "Production network final",
+                    "collect_container_network_ids first middle final",
+                    "final",
+                    ["first", "middle", "final"],
+                ),
+                (
+                    "Staging network first",
+                    "collect_container_network_ids first second",
+                    "first",
+                    ["first"],
+                ),
+                (
+                    "Staging network second",
+                    "collect_container_network_ids first second",
+                    "second",
+                    ["first", "second"],
+                ),
+                (
+                    "Production volume first",
+                    "collect_container_volume_names first middle final",
+                    "first",
+                    ["first"],
+                ),
+                (
+                    "Production volume middle",
+                    "collect_container_volume_names first middle final",
+                    "middle",
+                    ["first", "middle"],
+                ),
+                (
+                    "Production volume final",
+                    "collect_container_volume_names first middle final",
+                    "final",
+                    ["first", "middle", "final"],
+                ),
+                (
+                    "Staging volume inspect",
+                    "collect_container_volume_names first second",
+                    "second",
+                    ["first", "second"],
+                ),
+            )
+            for name, command, failed_id, expected_calls in failure_cases:
+                with self.subTest(failure=name):
+                    log.write_text("")
+                    result = self.run_lib(
+                        command,
+                        env={**base_env, "STAGING_TEST_FAIL_ID": failed_id},
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(
+                        log.read_text().splitlines(), expected_calls
+                    )
+                    self.assertIn("failed to inspect container", result.stderr)
+
     def test_partial_compose_up_failure_runs_safe_down(self) -> None:
         for resource in ("container", "network", "volume"):
             with (
