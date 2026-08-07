@@ -1,3 +1,5 @@
+import json
+import subprocess
 import unittest
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -7,6 +9,7 @@ from uuid import UUID
 from app.supervision_cli import (
     GitHubEvidence,
     GitHubVerificationError,
+    _run_gh_paginated_check_runs,
     run,
     verify_github_state,
 )
@@ -16,27 +19,98 @@ SHA = "a" * 40
 
 
 class SupervisionCliTests(unittest.TestCase):
+    @staticmethod
+    def _gate(
+        *,
+        status: str = "completed",
+        conclusion: str | None = "success",
+        name: str = "CI / Quality Gate",
+        check_id: object = None,
+    ) -> dict:
+        return {
+            "id": check_id,
+            "name": name,
+            "status": status,
+            "conclusion": conclusion,
+        }
+
+    def _verify_gate_runs(
+        self,
+        check_runs: object,
+        *,
+        event_type: str = "ci_passed",
+    ) -> None:
+        with (
+            patch("app.supervision_cli._run_gh_json") as run_gh,
+            patch(
+                "app.supervision_cli._run_gh_paginated_check_runs",
+                return_value=check_runs,
+            ),
+        ):
+            run_gh.side_effect = [
+                {"sha": SHA},
+                {"number": 14, "headRefOid": SHA, "state": "OPEN"},
+            ]
+            verify_github_state(
+                GitHubEvidence(
+                    event_type,
+                    "Mxx1233/Maoxx-OS",
+                    SHA,
+                    14,
+                )
+            )
+
+    @patch("app.supervision_cli._run_gh_paginated_check_runs")
     @patch("app.supervision_cli._run_gh_json")
     def test_exact_github_quality_gate_success(
-        self, run_gh: MagicMock
+        self,
+        run_gh: MagicMock,
+        paginated_checks: MagicMock,
     ) -> None:
         run_gh.side_effect = [
             {"sha": SHA},
             {"number": 14, "headRefOid": SHA, "state": "OPEN"},
-            {
-                "check_runs": [
-                    {
-                        "id": 1,
-                        "name": "CI / Quality Gate",
-                        "status": "completed",
-                        "conclusion": "success",
-                        "started_at": "2026-08-07T10:00:00Z",
-                    }
-                ]
-            },
         ]
+        paginated_checks.return_value = [self._gate(check_id="arbitrary")]
         verify_github_state(
             GitHubEvidence("ci_passed", "Mxx1233/Maoxx-OS", SHA, 14)
+        )
+        self.assertEqual(
+            paginated_checks.call_args.args[0],
+            "repos/Mxx1233/Maoxx-OS/commits/"
+            f"{SHA}/check-runs?filter=latest&per_page=100",
+        )
+
+    @patch("app.supervision_cli.subprocess.run")
+    def test_paginated_query_uses_safe_latest_filter_json_lines(
+        self,
+        subprocess_run: MagicMock,
+    ) -> None:
+        subprocess_run.return_value = SimpleNamespace(
+            stdout=(
+                '{"name":"CI / Other","status":"completed"}\n'
+                '{"name":"CI / Quality Gate","status":"completed",'
+                '"conclusion":"success"}\n'
+            )
+        )
+        checks = _run_gh_paginated_check_runs(
+            "repos/Mxx1233/Maoxx-OS/commits/"
+            f"{SHA}/check-runs?filter=latest&per_page=100"
+        )
+        self.assertEqual(len(checks), 2)
+        subprocess_run.assert_called_once_with(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "repos/Mxx1233/Maoxx-OS/commits/"
+                f"{SHA}/check-runs?filter=latest&per_page=100",
+                "--jq",
+                ".check_runs[] | @json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
 
     @patch("app.supervision_cli._run_gh_json")
@@ -52,120 +126,132 @@ class SupervisionCliTests(unittest.TestCase):
                 )
             )
 
-    def _verify_gate_runs(self, check_runs: list[dict]) -> None:
-        with patch("app.supervision_cli._run_gh_json") as run_gh:
-            run_gh.side_effect = [
-                {"sha": SHA},
-                {"number": 14, "headRefOid": SHA, "state": "OPEN"},
-                {"check_runs": check_runs},
-            ]
+    @patch("app.supervision_cli._run_gh_json")
+    def test_github_verification_rejects_non_exact_sha(
+        self,
+        run_gh: MagicMock,
+    ) -> None:
+        with self.assertRaises(GitHubVerificationError):
             verify_github_state(
                 GitHubEvidence(
                     "ci_passed",
                     "Mxx1233/Maoxx-OS",
-                    SHA,
+                    "A" * 40,
                     14,
                 )
             )
-            self.assertIn(
-                "check-runs?filter=all&per_page=100",
-                run_gh.call_args_list[-1].args[0][-1],
+        run_gh.assert_not_called()
+
+    def test_non_success_gate_never_satisfies_ci_passed(self) -> None:
+        for status, conclusion in (
+            ("pending", None),
+            ("queued", None),
+            ("in_progress", None),
+            ("completed", "failure"),
+            ("completed", "cancelled"),
+            ("completed", "timed_out"),
+            ("completed", "neutral"),
+            ("completed", "skipped"),
+        ):
+            with self.subTest(status=status):
+                with self.assertRaises(GitHubVerificationError):
+                    self._verify_gate_runs(
+                        [
+                            self._gate(
+                                status=status,
+                                conclusion=conclusion,
+                            )
+                        ]
+                    )
+
+    def test_ci_failed_requires_completed_failure_conclusion(self) -> None:
+        for conclusion in ("failure", "cancelled", "timed_out"):
+            with self.subTest(conclusion=conclusion):
+                self._verify_gate_runs(
+                    [self._gate(conclusion=conclusion)],
+                    event_type="ci_failed",
+                )
+        with self.assertRaises(GitHubVerificationError):
+            self._verify_gate_runs(
+                [
+                    self._gate(
+                        status="in_progress",
+                        conclusion=None,
+                    )
+                ],
+                event_type="ci_failed",
             )
 
-    def test_newer_in_progress_gate_rejects_old_success(
-        self,
-    ) -> None:
-        checks = [
-            {
-                "id": 2,
-                "name": "CI / Quality Gate",
-                "status": "in_progress",
-                "conclusion": None,
-                "started_at": "2026-08-07T11:00:00Z",
-            },
-            {
-                "id": 1,
-                "name": "CI / Quality Gate",
-                "status": "completed",
-                "conclusion": "success",
-                "started_at": "2026-08-07T10:00:00Z",
-            },
-        ]
-        with self.assertRaises(GitHubVerificationError):
-            self._verify_gate_runs(checks)
-
-    def test_newer_pending_without_started_at_rejects_old_success(
-        self,
-    ) -> None:
-        for status in ("pending", "queued"):
-            with self.subTest(status=status):
-                checks = [
-                    {
-                        "id": 2,
-                        "name": "CI / Quality Gate",
-                        "status": status,
-                        "conclusion": None,
-                        "started_at": None,
-                    },
-                    {
-                        "id": 1,
-                        "name": "CI / Quality Gate",
-                        "status": "completed",
-                        "conclusion": "success",
-                        "started_at": "2026-08-07T10:00:00Z",
-                    },
-                ]
-                with self.assertRaises(GitHubVerificationError):
-                    self._verify_gate_runs(checks)
-
-    def test_newer_failed_gate_rejects_old_success(self) -> None:
-        checks = [
-            {
-                "id": 2,
-                "name": "CI / Quality Gate",
-                "status": "completed",
-                "conclusion": "failure",
-            },
-            {
-                "id": 1,
-                "name": "CI / Quality Gate",
-                "status": "completed",
-                "conclusion": "success",
-            },
-        ]
-        with self.assertRaises(GitHubVerificationError):
-            self._verify_gate_runs(checks)
-
-    def test_quality_gate_missing_or_ambiguous_fails_closed(self) -> None:
+    def test_exact_quality_gate_is_required_and_unique(self) -> None:
         cases = (
             [],
+            [self._gate(name="CI / Quality Gate Extra")],
             [
-                {
-                    "id": 2,
-                    "name": "CI / Quality Gate",
-                    "status": "completed",
-                    "conclusion": "success",
-                },
-                {
-                    "id": 3,
-                    "name": "CI / Quality Gate",
-                    "status": "completed",
-                    "conclusion": "success",
-                },
-            ],
-            [
-                {
-                    "id": None,
-                    "name": "CI / Quality Gate",
-                    "status": "completed",
-                    "conclusion": "success",
-                }
+                self._gate(check_id=999),
+                self._gate(check_id=-7),
             ],
         )
-        for checks in cases:
-            with self.subTest(checks=checks):
+        for check_runs in cases:
+            with self.subTest(check_runs=check_runs):
+                with self.assertRaises(GitHubVerificationError):
+                    self._verify_gate_runs(check_runs)
+
+    def test_response_order_and_ids_do_not_determine_freshness(self) -> None:
+        exact_gate = self._gate(check_id=-900)
+        unrelated = self._gate(
+            name="CI / Other",
+            check_id=999999999,
+        )
+        for check_runs in (
+            [exact_gate, unrelated],
+            [unrelated, exact_gate],
+        ):
+            with self.subTest(check_runs=check_runs):
+                self._verify_gate_runs(check_runs)
+
+    @patch("app.supervision_cli.subprocess.run")
+    def test_later_page_quality_gate_causes_ambiguity(
+        self,
+        subprocess_run: MagicMock,
+    ) -> None:
+        gates = [self._gate(check_id=100), self._gate(check_id=1)]
+        for ordered_gates in (gates, list(reversed(gates))):
+            with self.subTest(ordered_gates=ordered_gates):
+                subprocess_run.return_value = SimpleNamespace(
+                    stdout="\n".join(
+                        json.dumps(gate) for gate in ordered_gates
+                    )
+                )
+                checks = _run_gh_paginated_check_runs(
+                    "repos/Mxx1233/Maoxx-OS/commits/"
+                    f"{SHA}/check-runs?filter=latest&per_page=1"
+                )
                 with self.assertRaises(GitHubVerificationError):
                     self._verify_gate_runs(checks)
+
+    @patch("app.supervision_cli.subprocess.run")
+    def test_malformed_paginated_json_fails_closed(
+        self,
+        subprocess_run: MagicMock,
+    ) -> None:
+        for malformed in ("not-json", '"not-a-check"'):
+            with self.subTest(malformed=malformed):
+                subprocess_run.return_value = SimpleNamespace(stdout=malformed)
+                with self.assertRaises(GitHubVerificationError):
+                    _run_gh_paginated_check_runs(
+                        "repos/Mxx1233/Maoxx-OS/commits/"
+                        f"{SHA}/check-runs?filter=latest&per_page=100"
+                    )
+
+        subprocess_run.side_effect = subprocess.CalledProcessError(
+            1,
+            ["gh", "api", "--paginate"],
+        )
+        with self.assertRaises(GitHubVerificationError):
+            _run_gh_paginated_check_runs(
+                "repos/Mxx1233/Maoxx-OS/commits/"
+                f"{SHA}/check-runs?filter=latest&per_page=100"
+            )
 
     def test_approval_is_persisted_before_message_send(self) -> None:
         events: list[str] = []

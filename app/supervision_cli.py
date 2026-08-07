@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ class GitHubVerificationError(RuntimeError):
 
 
 QUALITY_GATE_NAME = "CI / Quality Gate"
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,39 @@ def _run_gh_json(arguments: list[str]) -> object:
         ) from exc
 
 
+def _run_gh_paginated_check_runs(endpoint: str) -> list[dict]:
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                endpoint,
+                "--jq",
+                ".check_runs[] | @json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        check_runs = [json.loads(line) for line in result.stdout.splitlines()]
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise GitHubVerificationError(
+            "GitHub paginated check verification unavailable"
+        ) from exc
+    if any(not isinstance(check, dict) for check in check_runs):
+        raise GitHubVerificationError("GitHub check response invalid")
+    return check_runs
+
+
 def verify_github_state(evidence: GitHubEvidence) -> None:
+    if not SHA_PATTERN.fullmatch(evidence.target_sha):
+        raise GitHubVerificationError("GitHub target SHA invalid")
+
     commit = _run_gh_json(
         ["api", f"repos/{evidence.repository}/commits/{evidence.target_sha}"]
     )
@@ -95,48 +129,27 @@ def verify_github_state(evidence: GitHubEvidence) -> None:
             raise GitHubVerificationError("GitHub PR head SHA mismatch")
 
     if evidence.event_type in {"ci_passed", "ci_failed"}:
-        response = _run_gh_json(
-            [
-                "api",
-                f"repos/{evidence.repository}/commits/"
-                f"{evidence.target_sha}/check-runs?filter=all&per_page=100",
-            ]
+        check_runs = _run_gh_paginated_check_runs(
+            f"repos/{evidence.repository}/commits/"
+            f"{evidence.target_sha}/check-runs?filter=latest&per_page=100"
         )
-        if not isinstance(response, dict):
-            raise GitHubVerificationError("GitHub check response invalid")
-        check_runs = response.get("check_runs")
-        if not isinstance(check_runs, list):
+        if any(not isinstance(check, dict) for check in check_runs):
             raise GitHubVerificationError("GitHub check response invalid")
         checks = [
             check
             for check in check_runs
-            if isinstance(check, dict)
-            and check.get("name") == QUALITY_GATE_NAME
+            if check.get("name") == QUALITY_GATE_NAME
         ]
-        if not checks:
-            raise GitHubVerificationError("Quality Gate unavailable")
 
-        # GitHub returns check runs newest first.  Requesting filter=all keeps
-        # reruns visible; check-run IDs validate that the exact-name subset
-        # preserves that newest-first identity ordering even when a queued run
-        # has no started_at.  Malformed, duplicate, or ambiguous order fails
-        # closed instead of falling back to an older success.
-        check_ids = [check.get("id") for check in checks]
-        if any(
-            isinstance(check_id, bool)
-            or not isinstance(check_id, int)
-            or check_id < 1
-            for check_id in check_ids
-        ):
-            raise GitHubVerificationError("Quality Gate identity ambiguous")
-        if len(set(check_ids)) != len(check_ids) or check_ids != sorted(
-            check_ids, reverse=True
-        ):
-            raise GitHubVerificationError("Quality Gate ordering ambiguous")
-        latest = checks[0]
-        if latest.get("status") != "completed":
+        if len(checks) == 0:
+            raise GitHubVerificationError("Quality Gate unavailable")
+        if len(checks) != 1:
+            raise GitHubVerificationError("Quality Gate is ambiguous")
+
+        quality_gate = checks[0]
+        if quality_gate.get("status") != "completed":
             raise GitHubVerificationError("Quality Gate is not completed")
-        conclusion = latest.get("conclusion")
+        conclusion = quality_gate.get("conclusion")
         if evidence.event_type == "ci_passed" and conclusion != "success":
             raise GitHubVerificationError("Quality Gate is not successful")
         if evidence.event_type == "ci_failed" and conclusion not in {
