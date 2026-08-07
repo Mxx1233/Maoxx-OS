@@ -151,6 +151,15 @@ require_single_container() {
   [[ "$count" == 1 ]] || die "expected exactly one $1/$2 container"
   printf '%s\n' "$ids"
 }
+require_container_compose_label() {
+  local id="$1" key="$2" expected="$3" description="$4" actual
+  case "$key" in
+    com.docker.compose.project|com.docker.compose.service) ;;
+    *) die "unsupported Docker Compose label key: $key" ;;
+  esac
+  actual="$(docker inspect --format "{{index .Config.Labels \"${key}\"}}" "$id")" || die "failed to inspect $description label"
+  [[ "$actual" == "$expected" ]] || die "wrong $description label"
+}
 require_no_staging_containers() {
   [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging instance already exists"
   [[ -z "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging network already exists"

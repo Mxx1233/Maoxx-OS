@@ -9,10 +9,10 @@ db_id="$(require_single_container "$STAGING_PROJECT" db)"
 STAGING_API_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$api_id")"
 export STAGING_API_IMAGE
 [[ -z "$(docker ps -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}" --filter 'label=com.docker.compose.service=feishu-worker')" ]] || die "worker must not run"
-[[ "$(docker inspect --format '{{.Config.Labels.com.docker.compose.project}}' "$api_id")" == "$STAGING_PROJECT" ]] || die "wrong API project label"
-[[ "$(docker inspect --format '{{.Config.Labels.com.docker.compose.service}}' "$api_id")" == api ]] || die "wrong API service label"
-[[ "$(docker inspect --format '{{.Config.Labels.com.docker.compose.project}}' "$db_id")" == "$STAGING_PROJECT" ]] || die "wrong DB project label"
-[[ "$(docker inspect --format '{{.Config.Labels.com.docker.compose.service}}' "$db_id")" == db ]] || die "wrong DB service label"
+require_container_compose_label "$api_id" com.docker.compose.project "$STAGING_PROJECT" "API project"
+require_container_compose_label "$api_id" com.docker.compose.service api "API service"
+require_container_compose_label "$db_id" com.docker.compose.project "$STAGING_PROJECT" "DB project"
+require_container_compose_label "$db_id" com.docker.compose.service db "DB service"
 [[ "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}" | wc -l)" == 2 ]] || die "unexpected staging container exists"
 mapfile -t db_networks < <(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$db_id" | sort)
 mapfile -t api_networks < <(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$api_id" | sort)
