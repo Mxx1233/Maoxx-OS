@@ -37,3 +37,12 @@
 ## AI 代理规则
 
 AI 代理必须以最小权限工作，先只读验证目标和影响面。任何删除、覆盖、生产迁移、外部发布或凭据相关操作都必须获得明确批准。
+
+## 飞书监督审批边界
+
+- `FEISHU_SUPERVISION_CHAT_ID`、`FEISHU_APPROVER_OPEN_IDS` 和 TTL 只通过环境注入；缺失、空值或 TTL 超出 1–86400 秒均 fail closed。
+- 审批同时要求既有 tenant/sender/chat 授权、独立 approver allowlist 和精确 supervision chat；不以普通 sender allowlist 替代审批人名单。
+- 通知只使用固定事件和字段；禁止转发任意日志、stack trace、URL、异常正文或 Secret。
+- 审批决定绑定 action、完整 SHA、environment、request UUID 和数据库过期时间；每请求只允许一个决定，飞书 event ID 唯一。
+- 数据库只保存完整 SHA-256 身份指纹，不保存 Secret；日志不记录命令正文、chat/open_id 原值或数据库连接串。
+- Feishu 决定只用于审计，不 approve/merge PR、不执行 Production deployment。Phase 1D-F 必须另行设计原子单次消费。

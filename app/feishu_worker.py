@@ -16,6 +16,10 @@ from app.services.feishu_authorization import (
     authorize_feishu_message,
     identifier_fingerprint,
 )
+from app.services.approval_service import (
+    approval_outcome_reply,
+    process_approval_message,
+)
 from app.services.feishu_delivery import deliver_with_retry
 from app.services.feishu_replies import recorded_reply
 from app.services.worker_health import (
@@ -148,6 +152,35 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
                 message_id,
                 "没有识别到有效文字内容。",
             )
+            return
+
+        with SessionLocal() as db:
+            approval_outcome = process_approval_message(
+                db,
+                text=text_content,
+                tenant_key=tenant_key,
+                sender_type=sender.get("sender_type"),
+                sender_open_id=sender_open_id,
+                chat_type=chat_type,
+                chat_id=message.get("chat_id"),
+                feishu_event_id=header.get("event_id") or message_id,
+                actor_user_id=settings.default_user_id,
+                allowed_tenant_keys=settings.allowed_tenant_keys,
+                allowed_open_ids=settings.allowed_open_ids,
+                allowed_chat_types=settings.allowed_chat_types,
+                approver_open_ids=settings.approver_open_ids,
+                supervision_chat_id=(
+                    settings.feishu_supervision_chat_id.strip()
+                ),
+            )
+
+        if approval_outcome is not None:
+            logger.info(
+                "event=feishu_approval_result result=%s message=%s",
+                approval_outcome.code,
+                identifier_fingerprint(message_id),
+            )
+            reply_text(message_id, approval_outcome_reply(approval_outcome))
             return
 
         metadata = {

@@ -17,13 +17,15 @@
 
 ### Accepted
 
+- Phase 1D-D Staging 真实运行验收通过：批准 SHA 的 immutable image build、retained PostgreSQL volume 复用、DB/API health、Alembic upgrade 幂等、HTTP environment/database、network/volume/port/mount/image 隔离和 Production 前后不变量均通过；Staging db/api 保持运行、Worker 关闭，Production 未变化。
 - Phase 1D-A GitHub Development Governance 已通过用户验收：PR #2、#3、#4 独立合并，main Ruleset、模板、CODEOWNERS 和 migration 人工审查规则均已验证。
 - Phase 1D-B GitHub Actions CI 已通过验收：五个 job 全绿，`CI / Quality Gate` 已成为唯一 required check，临时失败与普通修复 commit 已验证失败阻断和恢复路径。
 - Phase 1D-C Codex Cloud workflow 已通过验收：仓库连接和最小权限边界、非生产环境、zero-diff 只读任务、Cloud 分支和 PR #8 创建/更新均已验证；最新 synchronize event 自动触发的五个 CI job 全绿，required `CI / Quality Gate` 通过。
 
 ### Added
 
-- Phase 1D-D 隔离 Staging 的 Compose、无效示例配置、共享安全库、preflight/deploy/verify/stop 脚本、静态测试和 CI 检查；当前仅为代码实现，未部署或执行 migration。
+- Phase 1D-E 飞书监督审批代码：固定结构通知、本地只读 `gh` 核验 CLI、严格 `批准/拒绝 <request-uuid>` 路由、独立 approver/chat 授权、`0002_phase_1d_e_approvals` request/decision 表、数据库时限、行锁、幂等/并发约束及 append-only trigger。当前未执行 Production migration、未部署 Worker 新版本、未发送真实飞书消息。
+- Phase 1D-D 最初增加隔离 Staging 的 Compose、无效示例配置、共享安全库、preflight/deploy/verify/stop 脚本、静态测试和 CI 检查；随后已完成本节 `Accepted` 记录的真实运行验收。
 - Phase 1D-C Codex Cloud repository workflow 文档：GitHub 连接仅限 `Mxx1233/Maoxx-OS`，Cloud 环境为无 Secrets 或生产凭据且禁用 agent internet access 的非生产环境；成功的只读验证保持 zero file diff。
 - Phase 1D-C Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建和更新；未绕过任何 CI 要求、直接写 `main`、自动批准或合并，也未访问 Production。
 - Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
@@ -33,13 +35,14 @@
 
 ### Changed
 
-- Phase 1D-D 状态设为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。首次 Staging 部署需在 PR 合并和 post-merge 验收后单独人工批准。
+- Phase 1D-D 状态更新为 `accepted`；Phase 1D-E 状态设为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。Phase 1D-E 决定只记录审计，不 approve/merge GitHub 或部署 Production。
+- Phase 1D-D 实现阶段曾设为 `implemented_pending_verification` 并要求首次部署单独批准；该批准与运行验收现已完成，当前状态以上方最新条目为准。
 - Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
 - 文档-only Pull Request 同样受 required `CI / Quality Gate` 治理；PR #8 最新 synchronize event 已自动触发并通过全部五个 CI job。
 
 ### Known issues
 
-- Phase 1D-D 尚无真实 Staging 部署、migration、健康、Worker 或 Production 前后不变量验收证据，因此不得标记为 `accepted`。
+- Phase 1D-E 主动发消息权限、Production `0002` migration、Worker rollout 及真实允许/拒绝/未授权/重复/过期审批尚未验收；不得标记为 `accepted` 或进入 Phase 1D-F。
 - Ruff formatter 精确排除 4 个既有格式文件，避免 Phase 1D-B 扩大为业务代码批量格式化；这些文件仍接受 compile 和 lint。
 - 当前单 PR CI 范围尚未加入独立 API 测试、secret scanning 或破坏性 migration 自动扫描，对应审计项不得标记为 `configured`。
 

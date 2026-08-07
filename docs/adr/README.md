@@ -40,3 +40,4 @@ ADR 一经接受不应重写历史。若决策改变，创建新 ADR 并将旧 A
 - [0004: No Redis before clear need](0004-no-redis-before-clear-need.md)
 - [0005: Feishu as primary user interface](0005-feishu-as-primary-user-interface.md)
 - [0006: AI output requires traceability](0006-ai-output-requires-traceability.md)
+- [0007: Feishu approvals are audited decisions, not executors](0007-feishu-approvals-are-audited-decisions.md)

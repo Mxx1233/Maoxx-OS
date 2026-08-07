@@ -75,6 +75,10 @@ jobs:
         run: |
           ! grep -RInE '(ghp_|github_pat_|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' compose.staging.yml .env.staging.example scripts/staging tests/test_staging_*.py
           ! grep -RInE '(source[[:space:]]+.*\.env\.staging|eval[[:space:]]|set[[:space:]]+-x|down[[:space:]]+-v|volume[[:space:]]+rm|system[[:space:]]+prune|alembic[[:space:]]+downgrade|--parallel|:latest)' scripts/staging
+      - name: Scan Phase 1D-E files for secrets and protected mutations
+        run: |
+          ! grep -RInE '(ghp_|github_pat_|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' app alembic tests docs/PHASE_1D_E_SUPERVISION.md
+          ! grep -RInE '(gh[[:space:]]+(pr[[:space:]]+(merge|review)|api[[:space:]].*(-X|--method)[[:space:]]*(POST|PUT|PATCH|DELETE))|docker[[:space:]]+compose[[:space:]]+(up|restart)|alembic[[:space:]]+(upgrade|downgrade))' app/supervision_cli.py app/services/approval_service.py
 
   unit-tests:
     name: CI / Unit Tests

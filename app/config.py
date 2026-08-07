@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     feishu_allowed_tenant_keys: str = ""
     feishu_allowed_open_ids: str = ""
     feishu_allowed_chat_types: str = "p2p"
+    feishu_supervision_chat_id: str = ""
+    feishu_approver_open_ids: str = ""
+    feishu_approval_ttl_seconds: int = Field(
+        default=1800,
+        ge=1,
+        le=86400,
+    )
     feishu_reply_max_attempts: int = Field(default=3, ge=1, le=5)
     feishu_reply_backoff_seconds: float = Field(default=0.5, ge=0, le=30)
 
@@ -46,6 +53,17 @@ class Settings(BaseSettings):
     @property
     def allowed_chat_types(self) -> frozenset[str]:
         return parse_csv_set(self.feishu_allowed_chat_types)
+
+    @property
+    def approver_open_ids(self) -> frozenset[str]:
+        return parse_csv_set(self.feishu_approver_open_ids)
+
+    @property
+    def approval_configuration_valid(self) -> bool:
+        return bool(
+            self.feishu_supervision_chat_id.strip()
+            and self.approver_open_ids
+        )
 
 
 settings = Settings()

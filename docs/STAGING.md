@@ -1,6 +1,6 @@
 # Phase 1D-D Staging
 
-Phase 1D-D 当前为 `implemented_pending_verification`，Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。仓库只实现隔离 Staging 的 Compose、部署/验证/停止脚本、静态测试和运维边界。Staging 尚未部署，migration 尚未执行，Feishu Worker 尚未测试，Production 未部署新版本。
+Phase 1D-D 当前为 `accepted`，Phase 1D-E 为 `implemented_pending_verification`，Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。精确批准 SHA 的 immutable build、独立 DB/storage/network、retained volume 重试、Alembic 幂等、DB/API 健康、HTTP、port/mount/image 隔离及 Production 前后不变量均已通过真实运行验收。Staging `db` 和 `api` 保持运行，Staging Worker 关闭；Production 未部署新版本。
 
 ## 隔离边界
 
@@ -33,4 +33,4 @@ scripts/staging/stop.sh
 
 preflight 只接受两种 fail-closed 资源状态：完全没有 `maoxx-staging` container、network 或 volume 的首次部署状态；或没有 container/network，且唯一 volume 同时具有 Compose project `maoxx-staging`、volume identity `postgres_data` 并精确命名为 `maoxx-staging_postgres_data` 的失败重试状态。额外对象、未知/Production/unlabeled volume、错误 label 或 Docker 查询失败均拒绝。合法 retained volume 由 Compose 自然复用，不删除、重建或手工读取其内容；再次执行 `alembic upgrade head` 用于验证 forward migration 幂等性。
 
-本阶段不启用 Registry，不修改 Production Compose，不部署 Production，不进入 Phase 1D-E、1D-F 或 Phase 2A。只有首次真实隔离部署、migration、健康与 Production 不变量验收完成后，Phase 1D-D 才可由用户标记为 `accepted`。
+本阶段不启用 Registry，不修改 Production Compose，不部署 Production。运行验收通过不授权 Phase 1D-E 代码自动修改 Staging，也不授权进入 Phase 1D-F 或 Phase 2A。
