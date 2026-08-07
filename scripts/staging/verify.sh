@@ -18,6 +18,12 @@ mapfile -t db_networks < <(docker inspect --format '{{range $k,$v := .NetworkSet
 mapfile -t api_networks < <(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$api_id" | sort)
 [[ "${db_networks[*]}" == "maoxx-staging_staging_internal" ]] || die "DB network isolation failed"
 [[ "${api_networks[*]}" == "maoxx-staging_staging_api maoxx-staging_staging_internal" ]] || die "API networks are unexpected"
+production_network_ids="$(for service in db api feishu-worker; do production_id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"; docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.NetworkID}}{{println}}{{end}}' "$production_id"; done)"
+staging_network_ids="$(for staging_id in "$db_id" "$api_id"; do docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.NetworkID}}{{println}}{{end}}' "$staging_id"; done)"
+production_volume_ids="$(for service in db api feishu-worker; do production_id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"; docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{println}}{{end}}{{end}}' "$production_id"; done)"
+staging_volume_ids="$(for staging_id in "$db_id" "$api_id"; do docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{println}}{{end}}{{end}}' "$staging_id"; done)"
+require_disjoint_resource_ids networks "$production_network_ids" "$staging_network_ids"
+require_disjoint_resource_ids volumes "$production_volume_ids" "$staging_volume_ids"
 docker inspect --format '{{json .NetworkSettings.Ports}}' "$db_id" | jq -e 'to_entries | all(.value==null)' >/dev/null || die "DB publishes a host port"
 docker inspect --format '{{json .NetworkSettings.Ports}}' "$api_id" | jq -e 'to_entries == [{"key":"8000/tcp","value":[{"HostIp":"127.0.0.1","HostPort":"18000"}]}]' >/dev/null || die "API published port is unexpected"
 docker inspect --format '{{json .Mounts}}' "$api_id" | jq -e 'length==1 and .[0].Destination=="/app/storage" and .[0].Source=="/opt/maoxx-os-staging/storage"' >/dev/null || die "API mounts are unexpected"

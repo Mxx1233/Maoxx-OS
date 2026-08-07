@@ -31,6 +31,7 @@
 - Staging 使用固定 Compose project、独立 networks/volume/storage 和 localhost API 端口；不得连接 Production network、volume、storage 或 Docker socket。
 - 默认 Staging 不启动 Feishu Worker；测试 profile 也只能使用禁用值或独立测试凭据。
 - Staging 失败处理保留数据库 volume，不执行 downgrade、prune 或数据删除。首次部署需要独立人工批准。
+- 批准 SHA、当前 HEAD、完整 clean worktree、关键部署路径和最新成功 CI 必须同时匹配后才能 build；脚本不得在运行中切换或清理 checkout。首次 Docker mutation 前必须注册仅针对精确 `maoxx-staging` project labels 的普通 `down` 失败清理。
 
 ## AI 代理规则
 

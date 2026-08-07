@@ -108,6 +108,8 @@ ruff format --check app tests
 
 Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [Phase 1D-D Staging](STAGING.md)。当前状态仅为 `implemented_pending_verification`。CI 会验证 Compose、ShellCheck、静态测试、Secret/禁止操作扫描和 `.dockerignore`，但这不代表服务器 Staging 已部署。在 PR 合并、服务器 post-merge 验收和单独人工批准之前，不得创建目录、构建镜像、启动服务或执行 migration。Production 的现有 `docker-compose.yml` 和运行状态不由 Staging 流程修改。
 
+部署操作者必须先把固定 checkout 明确置于批准 SHA，并保持 `git status --porcelain` 完全为空；部署脚本只验证，不执行 checkout、reset 或 clean。部分 `compose up` 失败由预先注册的精确 project-label 清理处理，仅执行普通 `down` 并保留数据库 volume。
+
 ## Worker 回复策略
 
 - 成功回复不重试。

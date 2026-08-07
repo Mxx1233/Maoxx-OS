@@ -21,6 +21,23 @@ require_command() { command -v "$1" >/dev/null 2>&1 || die "required command una
 require_sha() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] || die "SHA must be 40 lowercase hexadecimal characters"; }
 require_exact_path() { [[ "$(realpath -e -- "$1")" == "$2" ]] || die "unexpected path: $1"; }
 
+require_approved_checkout() {
+  local target_sha="$1" root="${2:-$STAGING_ROOT}" path
+  local -a critical_paths=(
+    scripts/staging/deploy.sh scripts/staging/lib.sh
+    scripts/staging/preflight.sh scripts/staging/verify.sh
+    scripts/staging/stop.sh compose.staging.yml Dockerfile
+    app alembic alembic.ini requirements.txt
+  )
+  require_sha "$target_sha"
+  [[ "$(git -C "$root" rev-parse HEAD)" == "$target_sha" ]] || die "current HEAD does not equal approved target SHA"
+  [[ -z "$(git -C "$root" status --porcelain=v1 --untracked-files=all)" ]] || die "deployment working tree must be completely clean"
+  for path in "${critical_paths[@]}"; do
+    git -C "$root" cat-file -e "${target_sha}:${path}" 2>/dev/null || die "deployment-critical path is absent from approved tree: $path"
+    [[ -e "$root/$path" ]] || die "deployment-critical path is absent from working tree: $path"
+  done
+}
+
 reject_polluted_environment() {
   local name
   while IFS='=' read -r name _; do
@@ -54,7 +71,10 @@ validate_env_file() {
   done
   [[ "${values[APP_ENV]}" == staging ]] || die "APP_ENV must be staging"
   [[ "${values[LOCAL_STORAGE_ROOT]}" == /app/storage ]] || die "LOCAL_STORAGE_ROOT must be /app/storage"
-  [[ "${values[DATABASE_URL]}" == postgresql+psycopg://*"@db:5432/${values[POSTGRES_DB]}" ]] || die "DATABASE_URL must target the staging db service"
+  [[ "${values[POSTGRES_DB]}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "POSTGRES_DB has invalid format"
+  [[ "${values[POSTGRES_USER]}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "POSTGRES_USER has invalid format"
+  [[ "${values[DATABASE_URL]}" =~ ^postgresql\+psycopg://([^:/@]+):[^@]+@db:5432/${values[POSTGRES_DB]}$ ]] || die "DATABASE_URL must target the staging db service"
+  [[ "${BASH_REMATCH[1]}" == "${values[POSTGRES_USER]}" ]] || die "DATABASE_URL username must equal POSTGRES_USER"
 }
 
 acquire_lock() { exec 9>"$STAGING_LOCK_FILE"; flock -n 9 || die "another staging operation holds the lock"; }
@@ -72,6 +92,26 @@ require_no_staging_containers() {
   [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging instance already exists"
   [[ -z "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging network already exists"
   [[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging volume already exists"
+}
+
+staging_project_resources_exist() {
+  [[ -n "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
+  [[ -n "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
+  [[ -n "$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] && return 0
+  return 1
+}
+
+safe_compose_down_if_present() {
+  if staging_project_resources_exist; then
+    info "cleaning up failed staging mutation; PostgreSQL volume will be retained"
+    "${COMPOSE[@]}" down
+  fi
+}
+
+require_disjoint_resource_ids() {
+  local kind="$1" production_ids="$2" staging_ids="$3" overlap
+  overlap="$(comm -12 <(printf '%s\n' "$production_ids" | sed '/^$/d' | sort -u) <(printf '%s\n' "$staging_ids" | sed '/^$/d' | sort -u))"
+  [[ -z "$overlap" ]] || die "Production and Staging ${kind} identities overlap"
 }
 
 production_snapshot() {
@@ -106,7 +146,12 @@ redact() { sed -E 's#(postgresql[^:]*://)[^@[:space:]]+@#\1[REDACTED]@#g; s/(PAS
 verify_ci_success() {
   local sha="$1" json run_id
   json="$(gh api "repos/Mxx1233/Maoxx-OS/actions/runs?head_sha=${sha}&per_page=100")"
-  run_id="$(jq -er --arg sha "$sha" '[.workflow_runs[] | select(.head_sha==$sha and .name=="CI")] | sort_by(.id,.run_attempt) | last | select(.status=="completed" and .conclusion=="success") | .id' <<<"$json")" || die "latest CI workflow run/attempt is not successful"
+  run_id="$(latest_successful_ci_run_id "$json" "$sha")" || die "latest CI workflow run/attempt is not successful"
   json="$(gh api "repos/Mxx1233/Maoxx-OS/commits/${sha}/check-runs?per_page=100")"
   jq -e --arg sha "$sha" --arg name "$REQUIRED_CHECK" --arg run_id "$run_id" '[.check_runs[] | select(.head_sha==$sha and .name==$name and (.details_url | contains("/actions/runs/"+$run_id+"/")))] | sort_by(.id) | last as $r | ($r != null and $r.status=="completed" and $r.conclusion=="success")' <<<"$json" >/dev/null || die "required CI check is not successful for latest run"
+}
+
+latest_successful_ci_run_id() {
+  local json="$1" sha="$2"
+  jq -er --arg sha "$sha" '[.workflow_runs[] | select(.head_sha==$sha and .name=="CI")] | sort_by(.id,.run_attempt) | last | select(.status=="completed" and .conclusion=="success") | .id' <<<"$json"
 }

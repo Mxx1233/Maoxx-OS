@@ -25,4 +25,8 @@ scripts/staging/stop.sh
 
 不要 `source` 或 `eval` `.env.staging`。脚本串行构建 immutable SHA 镜像，启动独立数据库、执行向前 migration、启动 API 并比较 Production 不变量。验证失败只执行普通 Compose `down`，保留数据库 volume；禁止 downgrade、prune 或删除 volume。
 
+批准 SHA 是部署内容的唯一身份。部署前必须 freshly fetch `origin/main`，当前 `HEAD` 必须精确等于完整 40 位批准 SHA，且该 SHA 位于最新 `origin/main` 历史；整个工作树必须没有 tracked 修改或 untracked 文件。脚本不会 checkout、reset、clean 或删除本地文件来修复不一致，而是 fail closed。部署脚本、共享库、preflight/verify/stop、Compose、Dockerfile、应用、Alembic 与 requirements 都必须存在于同一批准 tree，因此镜像 tag `maoxx-os-staging-api:<SHA>` 对应实际执行和构建的内容。
+
+第一次 mutating Compose 调用前已注册失败清理。即使 `compose up` 部分创建 container、network 或 volume 后返回非零，EXIT 清理也只用精确 `com.docker.compose.project=maoxx-staging` labels 判断对象并执行普通 Compose `down`；不会使用 `-v`、`--volumes`、`--remove-orphans`、volume 删除、prune 或 downgrade，PostgreSQL volume 保留，Production project 不在清理范围内。
+
 本阶段不启用 Registry，不修改 Production Compose，不部署 Production，不进入 Phase 1D-E、1D-F 或 Phase 2A。只有首次真实隔离部署、migration、健康与 Production 不变量验收完成后，Phase 1D-D 才可由用户标记为 `accepted`。

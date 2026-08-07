@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,29 @@ class StagingComposeTests(unittest.TestCase):
         )
         self.assertEqual(int(db["mem_limit"]), 268435456)
         self.assertEqual(int(api["mem_limit"]), 402653184)
+        self.assertEqual(float(db["cpus"]), 0.5)
+        self.assertEqual(float(api["cpus"]), 0.75)
+        self.assertEqual(
+            db["command"],
+            [
+                "postgres",
+                "-c",
+                "max_connections=20",
+                "-c",
+                "shared_buffers=64MB",
+                "-c",
+                "work_mem=4MB",
+                "-c",
+                "maintenance_work_mem=32MB",
+            ],
+        )
+        self.assertEqual(len(api["volumes"]), 1)
+        storage_mount = api["volumes"][0]
+        self.assertEqual(storage_mount["type"], "bind")
+        self.assertEqual(
+            storage_mount["source"], "/opt/maoxx-os-staging/storage"
+        )
+        self.assertEqual(storage_mount["target"], "/app/storage")
 
     def test_forbidden_compose_features_absent(self) -> None:
         text = COMPOSE.read_text()
@@ -112,6 +136,33 @@ class StagingComposeTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
         for service in self.config["services"].values():
             self.assertEqual(service["restart"], "no")
+        self.assertNotRegex(text, r"(?m)^\s+name:\s*")
+        self.assertEqual(
+            self.config["networks"]["staging_api"]["name"],
+            "maoxx-staging_staging_api",
+        )
+        self.assertEqual(
+            self.config["networks"]["staging_internal"]["name"],
+            "maoxx-staging_staging_internal",
+        )
+        self.assertEqual(
+            self.config["volumes"]["postgres_data"]["name"],
+            "maoxx-staging_postgres_data",
+        )
+
+    def test_worker_and_database_credentials_are_staging_only(self) -> None:
+        values = {}
+        for line in (ROOT / ".env.staging.example").read_text().splitlines():
+            if line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                values[key] = value
+        self.assertEqual(values["FEISHU_APP_ID"], "disabled-for-staging")
+        self.assertEqual(values["FEISHU_APP_SECRET"], "disabled-for-staging")
+        self.assertEqual(values["APP_ENV"], "staging")
+        parsed = urlsplit(values["DATABASE_URL"])
+        self.assertEqual(parsed.username, values["POSTGRES_USER"])
+        self.assertEqual(parsed.hostname, "db")
+        self.assertEqual(parsed.path.removeprefix("/"), values["POSTGRES_DB"])
 
     def test_dockerignore_excludes_runtime_inputs(self) -> None:
         rules = set((ROOT / ".dockerignore").read_text().splitlines())

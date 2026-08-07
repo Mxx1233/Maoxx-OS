@@ -14,6 +14,7 @@ git fetch --prune origin
 git cat-file -e "${target_sha}^{commit}" || die "target commit does not exist"
 git merge-base --is-ancestor "$target_sha" origin/main || die "target SHA is not in latest origin/main history"
 [[ "$(git rev-parse "$target_sha")" == "$target_sha" ]] || die "target SHA did not resolve exactly"
+require_approved_checkout "$target_sha"
 verify_ci_success "$target_sha"
 [[ ! -L "$STAGING_ROOT" ]] || die "staging root must not be a symlink"
 [[ ! -e "$STAGING_STORAGE" || ! -L "$STAGING_STORAGE" ]] || die "storage must not be a symlink"
