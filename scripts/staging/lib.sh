@@ -154,6 +154,29 @@ require_single_container() {
   [[ "$count" == 1 ]] || die "expected exactly one $1/$2 container"
   printf '%s\n' "$ids"
 }
+wait_container_healthy() {
+  local project="$1" service="$2" attempts="${3:-75}" interval="${4:-2}"
+  local container_id inspection state health extra attempt
+  [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || die "health wait attempts must be a positive integer"
+  [[ "$interval" =~ ^[0-9]+$ ]] || die "health wait interval must be a non-negative integer"
+  container_id="$(require_single_container "$project" "$service")" || die "failed to discover $project/$service container"
+  for (( attempt = 1; attempt <= attempts; attempt++ )); do
+    inspection="$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id")" || die "failed to inspect $project/$service health"
+    IFS='|' read -r state health extra <<< "$inspection"
+    [[ -z "$extra" && -n "$state" && -n "$health" ]] || die "invalid $project/$service health inspection"
+    if [[ "$state" != running ]]; then
+      die "$project/$service exited before becoming healthy"
+    fi
+    case "$health" in
+      healthy) return 0 ;;
+      starting) ;;
+      unhealthy) die "$project/$service became unhealthy" ;;
+      *) die "unexpected $project/$service health status" ;;
+    esac
+    (( attempt == attempts )) || sleep "$interval"
+  done
+  die "timed out waiting for $project/$service health"
+}
 require_container_compose_label() {
   local id="$1" key="$2" expected="$3" description="$4" actual
   case "$key" in
