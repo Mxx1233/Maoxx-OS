@@ -31,7 +31,7 @@ The zero-diff result demonstrates that Codex Cloud can read the repository instr
 
 Codex Cloud successfully published branch `codex/implement-phase-1d-c-codex-cloud-validation` and created Pull Request #8 targeting `main`. CI was manually triggered for that Pull Request. `CI / PostgreSQL Integration` and `CI / Docker Build` completed successfully, while `CI / Quality` and `CI / Unit Tests` could not obtain GitHub-hosted runners during an external GitHub Actions service outage. Consequently, the required `CI / Quality Gate` remains blocked.
 
-Documentation-only Pull Requests are still governed by the required `CI / Quality Gate`. No CI requirement has been bypassed, and Pull Request #8 must not be approved or merged by Codex Cloud. Final Phase 1D-C acceptance waits for GitHub Actions service recovery, a conclusive required-check result, and manual review.
+All Pull Requests, including documentation-only Pull Requests, are subject to the required `CI / Quality Gate`. No CI requirement has been bypassed, and Pull Request #8 must not be approved or merged by Codex Cloud. Final Phase 1D-C acceptance waits for GitHub Actions service recovery, a conclusive required-check result, and manual review.
 
 ## Existing governance boundaries
 
