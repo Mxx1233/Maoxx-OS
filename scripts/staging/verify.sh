@@ -14,14 +14,19 @@ require_container_compose_label "$api_id" com.docker.compose.service api "API se
 require_container_compose_label "$db_id" com.docker.compose.project "$STAGING_PROJECT" "DB project"
 require_container_compose_label "$db_id" com.docker.compose.service db "DB service"
 [[ "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}" | wc -l)" == 2 ]] || die "unexpected staging container exists"
-mapfile -t db_networks < <(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$db_id" | sort)
-mapfile -t api_networks < <(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$api_id" | sort)
-[[ "${db_networks[*]}" == "maoxx-staging_staging_internal" ]] || die "DB network isolation failed"
-[[ "${api_networks[*]}" == "maoxx-staging_staging_api maoxx-staging_staging_internal" ]] || die "API networks are unexpected"
-production_network_ids="$(for service in db api feishu-worker; do production_id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"; docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.NetworkID}}{{println}}{{end}}' "$production_id"; done)"
-staging_network_ids="$(for staging_id in "$db_id" "$api_id"; do docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$v.NetworkID}}{{println}}{{end}}' "$staging_id"; done)"
-production_volume_ids="$(for service in db api feishu-worker; do production_id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"; docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{println}}{{end}}{{end}}' "$production_id"; done)"
-staging_volume_ids="$(for staging_id in "$db_id" "$api_id"; do docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{println}}{{end}}{{end}}' "$staging_id"; done)"
+db_networks="$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$db_id" | normalize_line_set)" || die "failed to inspect DB networks"
+api_networks="$(docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}' "$api_id" | normalize_line_set)" || die "failed to inspect API networks"
+require_exact_line_set "$db_networks" "maoxx-staging_staging_internal" "DB network isolation failed"
+require_exact_line_set "$api_networks" $'maoxx-staging_staging_api\nmaoxx-staging_staging_internal' "API networks are unexpected"
+production_container_ids=()
+for service in db api feishu-worker; do
+  production_id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"
+  production_container_ids+=("$production_id")
+done
+production_network_ids="$(collect_container_network_ids "${production_container_ids[@]}")" || die "failed to collect Production network identities"
+staging_network_ids="$(collect_container_network_ids "$db_id" "$api_id")" || die "failed to collect Staging network identities"
+production_volume_ids="$(collect_container_volume_names "${production_container_ids[@]}")" || die "failed to collect Production volume identities"
+staging_volume_ids="$(collect_container_volume_names "$db_id" "$api_id")" || die "failed to collect Staging volume identities"
 require_disjoint_resource_ids networks "$production_network_ids" "$staging_network_ids"
 require_disjoint_resource_ids volumes "$production_volume_ids" "$staging_volume_ids"
 docker inspect --format '{{json .NetworkSettings.Ports}}' "$db_id" | jq -e 'to_entries | all(.value==null)' >/dev/null || die "DB publishes a host port"
