@@ -41,6 +41,10 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Install quality tools
         run: python -m pip install --requirement requirements-dev.txt
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
       - name: Compile Python
         run: python -m compileall -q app tests
       - name: Lint Python
@@ -56,6 +60,21 @@ jobs:
           install -m 600 /dev/null .env
           trap 'rm -f .env' EXIT
           docker compose config --quiet
+      - name: Validate Staging configuration and scripts
+        env:
+          STAGING_API_IMAGE: maoxx-os-staging-api:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          cp .env.staging.example .env.staging
+          chmod 600 .env.staging
+          trap 'rm -f .env.staging' EXIT
+          docker compose --env-file .env.staging -p maoxx-staging -f compose.staging.yml config --quiet
+          bash -n scripts/staging/*.sh
+          shellcheck scripts/staging/*.sh
+          python -m unittest tests.test_staging_compose tests.test_staging_scripts -v
+      - name: Scan Staging files for secrets and forbidden operations
+        run: |
+          ! grep -RInE '(ghp_|github_pat_|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' compose.staging.yml .env.staging.example scripts/staging tests/test_staging_*.py
+          ! grep -RInE '(source[[:space:]]+.*\.env\.staging|eval[[:space:]]|set[[:space:]]+-x|down[[:space:]]+-v|volume[[:space:]]+rm|system[[:space:]]+prune|alembic[[:space:]]+downgrade|--parallel|:latest)' scripts/staging
 
   unit-tests:
     name: CI / Unit Tests
@@ -75,7 +94,11 @@ jobs:
       - name: Install application dependencies
         run: python -m pip install --requirement requirements.txt
       - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+        run: |
+          cp .env.staging.example .env.staging
+          chmod 600 .env.staging
+          trap 'rm -f .env.staging' EXIT
+          python -m unittest discover -s tests -v
 
   postgres-integration:
     name: CI / PostgreSQL Integration

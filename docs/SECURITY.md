@@ -25,6 +25,15 @@
 - 私钥不得共享；Token 不得提交；所有日志在展示或导出前必须脱敏。
 - API、Worker 和后台任务均执行相同的用户隔离与授权规则。
 
+## Staging 安全边界
+
+- `.env.staging` 必须独立创建、保持 Git ignored、mode 0600，且不得复制、source、eval 或 symlink Production `.env`。
+- Staging 使用固定 Compose project、独立 networks/volume/storage 和 localhost API 端口；不得连接 Production network、volume、storage 或 Docker socket。
+- 默认 Staging 不启动 Feishu Worker；测试 profile 也只能使用禁用值或独立测试凭据。
+- Staging 失败处理保留数据库 volume，不执行 downgrade、prune 或数据删除。首次部署需要独立人工批准。
+- 批准 SHA、当前 HEAD、完整 clean worktree、关键部署路径和最新成功 CI 必须同时匹配后才能 build；脚本不得在运行中切换或清理 checkout。首次 Docker mutation 前必须注册仅针对精确 `maoxx-staging` project labels 的普通 `down` 失败清理。
+- 镜像 build context 必须由批准 SHA 的 Git object archive 生成，不得直接使用 mutable checkout。archive 只包含必需 tracked inputs，拒绝 symlink，不包含 `.git`、`.env.staging`、`storage/` 或 ignored/untracked 文件，并在成功或失败时清理。
+
 ## AI 代理规则
 
 AI 代理必须以最小权限工作，先只读验证目标和影响面。任何删除、覆盖、生产迁移、外部发布或凭据相关操作都必须获得明确批准。

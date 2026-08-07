@@ -104,6 +104,14 @@ ruff format --check app tests
 四个既有文件仍使用早期格式并被 formatter 精确排除，但继续接受 compile
 和 lint。不要借 CI 维护任务批量格式化业务代码；后续应单独评审和清理。
 
+## Phase 1D-D Staging
+
+Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [Phase 1D-D Staging](STAGING.md)。当前状态仅为 `implemented_pending_verification`。CI 会验证 Compose、ShellCheck、静态测试、Secret/禁止操作扫描和 `.dockerignore`，但这不代表服务器 Staging 已部署。在 PR 合并、服务器 post-merge 验收和单独人工批准之前，不得创建目录、构建镜像、启动服务或执行 migration。Production 的现有 `docker-compose.yml` 和运行状态不由 Staging 流程修改。
+
+部署操作者必须先把固定 checkout 明确置于批准 SHA，并保持 `git status --porcelain` 完全为空；部署脚本只验证，不执行 checkout、reset 或 clean。部分 `compose up` 失败由预先注册的精确 project-label 清理处理，仅执行普通 `down` 并保留数据库 volume。
+
+Docker build 只使用批准 SHA 的 `git archive` 临时 context 和其中的 Dockerfile，不使用 `/opt/maoxx-os-staging` 作为 build context。临时 context 只包含镜像所需 tracked paths，设为只读并由 EXIT trap 清理；不要手工复制工作树内容到该目录。
+
 ## Worker 回复策略
 
 - 成功回复不重试。

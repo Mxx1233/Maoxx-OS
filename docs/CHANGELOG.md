@@ -19,6 +19,7 @@
 
 ### Added
 
+- Phase 1D-D 隔离 Staging 的 Compose、无效示例配置、共享安全库、preflight/deploy/verify/stop 脚本、静态测试和 CI 检查；当前仅为代码实现，未部署或执行 migration。
 - Phase 1D-C Codex Cloud repository workflow 文档：GitHub 连接仅限 `Mxx1233/Maoxx-OS`，Cloud 环境为无 Secrets 或生产凭据且禁用 agent internet access 的非生产环境；成功的只读验证保持 zero file diff。
 - Phase 1D-C Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建和更新；未绕过任何 CI 要求、直接写 `main`、自动批准或合并，也未访问 Production。
 - Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
@@ -28,11 +29,13 @@
 
 ### Changed
 
+- Phase 1D-D 状态设为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。首次 Staging 部署需在 PR 合并和 post-merge 验收后单独人工批准。
 - Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
 - 文档-only Pull Request 同样受 required `CI / Quality Gate` 治理；PR #8 最新 synchronize event 已自动触发并通过全部五个 CI job。
 
 ### Known issues
 
+- Phase 1D-D 尚无真实 Staging 部署、migration、健康、Worker 或 Production 前后不变量验收证据，因此不得标记为 `accepted`。
 - Ruff formatter 精确排除 4 个既有格式文件，避免 Phase 1D-B 扩大为业务代码批量格式化；这些文件仍接受 compile 和 lint。
 - 当前单 PR CI 范围尚未加入独立 API 测试、secret scanning 或破坏性 migration 自动扫描，对应审计项不得标记为 `configured`。
 

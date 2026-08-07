@@ -1,11 +1,15 @@
 .env
 .env.*
 !.env.example
+!.env.staging.example
 __pycache__/
 *.py[cod]
 .venv/
 storage/*
 !storage/.gitkeep
+.staging-operations/
+staging-operations/
+*.staging.local
 backups/*
 !backups/.gitkeep
 *.sql

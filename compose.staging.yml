@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: "no"
+    env_file:
+      - .env.staging
+    command:
+      - postgres
+      - -c
+      - max_connections=20
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+    mem_limit: 256m
+    cpus: 0.50
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - staging_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  api:
+    image: ${STAGING_API_IMAGE:?STAGING_API_IMAGE must be an immutable SHA tag}
+    restart: "no"
+    env_file:
+      - .env.staging
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 384m
+    cpus: 0.75
+    volumes:
+      - /opt/maoxx-os-staging/storage:/app/storage
+    networks:
+      - staging_internal
+      - staging_api
+    ports:
+      - "127.0.0.1:18000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  feishu-worker:
+    image: ${STAGING_API_IMAGE:?STAGING_API_IMAGE must be an immutable SHA tag}
+    profiles: ["feishu-test"]
+    restart: "no"
+    command: ["python", "-m", "app.feishu_worker"]
+    env_file:
+      - .env.staging
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - staging_internal
+      - staging_api
+
+networks:
+  staging_internal:
+    internal: true
+  staging_api:
+
+volumes:
+  postgres_data:
