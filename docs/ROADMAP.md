@@ -1,6 +1,6 @@
 # Maoxx OS 路线图
 
-状态枚举：`not_started`、`planned`、`in_progress`、`blocked`、`accepted`。只有当前阶段达到 `accepted` 且用户批准后才能进入下一阶段。
+状态枚举：`not_started`、`planned`、`in_progress`、`implemented_pending_verification`、`blocked`、`accepted`。只有当前阶段达到 `accepted` 且用户批准后才能进入下一阶段。
 
 ## 阶段 1：基础设施
 
@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；不得进入 Phase 1D-D 或 Phase 2A。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D-D 为 `implemented_pending_verification`，不得进入 Phase 1D-E 或 Phase 2A。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -53,6 +53,8 @@
 ### Phase 1D-D：Staging
 
 - 目标：建立与 Production 隔离、独立数据库和 storage、可按需启停且适应 2 CPU/2 GB RAM 的 Staging，并完成 migration 和健康验收。
+- 当前状态：`implemented_pending_verification`；仅完成 Compose、配置示例、安全脚本、静态 CI 与文档代码实现。未部署 Staging、未执行 migration、未测试 Worker，也未修改 Production。首次部署须在 PR 合并和服务器 post-merge 验收后单独人工批准。
+- 详细边界：[Phase 1D-D Staging](STAGING.md)。
 
 ### Phase 1D-E：Feishu Supervision and Approval
 

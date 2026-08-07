@@ -25,6 +25,13 @@
 - 私钥不得共享；Token 不得提交；所有日志在展示或导出前必须脱敏。
 - API、Worker 和后台任务均执行相同的用户隔离与授权规则。
 
+## Staging 安全边界
+
+- `.env.staging` 必须独立创建、保持 Git ignored、mode 0600，且不得复制、source、eval 或 symlink Production `.env`。
+- Staging 使用固定 Compose project、独立 networks/volume/storage 和 localhost API 端口；不得连接 Production network、volume、storage 或 Docker socket。
+- 默认 Staging 不启动 Feishu Worker；测试 profile 也只能使用禁用值或独立测试凭据。
+- Staging 失败处理保留数据库 volume，不执行 downgrade、prune 或数据删除。首次部署需要独立人工批准。
+
 ## AI 代理规则
 
 AI 代理必须以最小权限工作，先只读验证目标和影响面。任何删除、覆盖、生产迁移、外部发布或凭据相关操作都必须获得明确批准。

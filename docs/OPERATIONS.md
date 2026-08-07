@@ -104,6 +104,10 @@ ruff format --check app tests
 四个既有文件仍使用早期格式并被 formatter 精确排除，但继续接受 compile
 和 lint。不要借 CI 维护任务批量格式化业务代码；后续应单独评审和清理。
 
+## Phase 1D-D Staging
+
+Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [Phase 1D-D Staging](STAGING.md)。当前状态仅为 `implemented_pending_verification`。CI 会验证 Compose、ShellCheck、静态测试、Secret/禁止操作扫描和 `.dockerignore`，但这不代表服务器 Staging 已部署。在 PR 合并、服务器 post-merge 验收和单独人工批准之前，不得创建目录、构建镜像、启动服务或执行 migration。Production 的现有 `docker-compose.yml` 和运行状态不由 Staging 流程修改。
+
 ## Worker 回复策略
 
 - 成功回复不重试。

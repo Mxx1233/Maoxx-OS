@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`。Phase 2A 仍为 `not_started`。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`，Phase 1D-D 为 `implemented_pending_verification`。Phase 2A 仍为 `not_started`。
 
 GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；`CI / Quality Gate` 已配置为唯一 required status check。
 
@@ -100,11 +100,11 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 - GitHub Ruleset 和治理文件已通过 Phase 1D-A 验收；Phase 1D-B Actions CI 五个 job 已通过，required `CI / Quality Gate` 的失败阻断和恢复已验证。
 - Phase 1D-C 仓库工作流为 `accepted`：Codex Cloud GitHub 连接仅限 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据；只读验证任务成功且为 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建和更新。
 - PR #8 最新 `pull_request` synchronize event 自动触发五个 CI job，全部通过，包括 required `CI / Quality Gate`。没有绕过 CI 要求、直接写 `main`、自动批准或合并，也没有访问 Production。
-- Staging 隔离环境、飞书监督审批闭环和受控 Production 部署尚未建立。
+- Phase 1D-D 隔离 Staging 的代码和文档已实现，但尚未部署或运行验证；飞书监督审批闭环和受控 Production 部署尚未建立。
 
 ## 下一步
 
-Phase 1D-C 已验收。等待用户手动审查和处理 PR #8；不得自动批准或合并，不得进入 Phase 1D-D 或 Phase 2A。详细边界见 [Codex Cloud repository workflow](CODEX_CLOUD.md)。
+Phase 1D-C 已验收。Phase 1D-D 仅完成代码实现，等待 PR 人工审查、合并和服务器 post-merge 验收；首次 Staging 部署还需单独人工批准。不得自动批准或合并，不得进入 Phase 1D-E、1D-F 或 Phase 2A。详细边界见 [Phase 1D-D Staging](STAGING.md)。
 
 ## 最近一次验收
 

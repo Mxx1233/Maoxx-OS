@@ -4,7 +4,7 @@
 
 Phase 1D 当前状态为 `in_progress`。Phase 1D-0：Server Observability and Execution Foundation 已完成，但它只覆盖服务器端可观测性、运行健康、测试和恢复基础，不等同于完整 Cloud Development Control Plane。
 
-Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`，Phase 1D 整体保持 `in_progress`。Phase 2A 保持 `not_started`；不得进入 Phase 1D-D 或 Phase 2A。
+Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`，Phase 1D-D 为 `implemented_pending_verification`，Phase 1D 整体保持 `in_progress`。Phase 2A 保持 `not_started`；不得进入 Phase 1D-E 或 Phase 2A。
 
 本审计只使用：`configured`、`partially_configured`、`not_configured`、`cannot_verify`。仓库已由用户确认设为 Public；`Protect main` Ruleset 已启用。其他 GitHub 和 Codex Cloud 网页设置在没有证据时仍标记 `cannot_verify`。
 
@@ -33,10 +33,10 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B 和 Phase 1D-C 
 | 19 | Codex Cloud read-only validation task | configured | 只读任务成功读取 `AGENTS.md` 和强制文档，结果为 zero file diff。 |
 | 20 | Codex Cloud test branch | configured | Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，不直接写 `main`。 |
 | 21 | Codex Cloud test Pull Request | configured | Pull Request #8 已成功创建和更新并指向 `main`；最新 synchronize event 自动触发的五个 CI job 全部通过，包括 required `CI / Quality Gate`。 |
-| 22 | Staging environment | not_configured | 当前只有 Production Compose 运行环境。 |
-| 23 | staging database isolation | not_configured | 无独立 Staging 数据库配置。 |
-| 24 | staging storage isolation | not_configured | 无独立 Staging storage 配置。 |
-| 25 | staging deployment workflow | not_configured | 无 Staging 部署脚本或工作流。 |
+| 22 | Staging environment | partially_configured | 隔离 Compose 与安全脚本已实现，尚未实际部署验收。 |
+| 23 | staging database isolation | partially_configured | 独立 internal network、Compose volume 和无宿主端口已编码，尚未运行验证。 |
+| 24 | staging storage isolation | partially_configured | 固定独立 storage 路径及逃逸检查已编码，尚未运行验证。 |
+| 25 | staging deployment workflow | partially_configured | 串行构建、migration、验证和保留 volume 的停止流程已实现，尚未执行。 |
 | 26 | Feishu development-plan approval | not_configured | 只有文字输入授权，没有计划审批流程。 |
 | 27 | Feishu PR notification | not_configured | 无 GitHub/飞书通知集成。 |
 | 28 | Feishu merge approval | not_configured | 无合并审批动作或状态机。 |
@@ -70,9 +70,10 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B 和 Phase 1D-C 
 
 ### Phase 1D-D：Staging
 
-- 当前状态：`not_configured`。
-- 实施：设计按需启动的独立 Compose/project、数据库、volume/storage 和非生产配置，限制资源适应 2 CPU/2 GB RAM。
+- 当前状态：`implemented_pending_verification`。
+- 实施：独立 Compose project、数据库、network、volume、storage、端口和凭据边界及按需启动、migration、验证、停止脚本已经实现；默认 Worker 受 `feishu-test` profile 隔离。
 - 验收：Staging 无法连接 Production 数据库或 storage；migration、健康检查和测试通过；验收后可关闭且 Production 不受影响。
+- 当前仅有代码和静态测试证据；未创建 Staging、未执行 migration、未测试 Worker。首次部署必须在 PR 合并和服务器 post-merge 验收后单独人工批准。
 
 ### Phase 1D-E：Feishu Supervision and Approval
 
@@ -113,4 +114,4 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B 和 Phase 1D-C 
 
 ## 最小可执行的下一个任务
 
-Phase 1D-C 已验收；等待用户手动审查和处理 PR #8，不得自动批准或合并，不得进入 Phase 1D-D 或 Phase 2A。
+Phase 1D-C 已验收；Phase 1D-D 为 `implemented_pending_verification`，等待人工审查、合并、post-merge 验收和单独部署批准。不得自动批准或合并，不得进入 Phase 1D-E、1D-F 或 Phase 2A。

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly STAGING_ROOT="/opt/maoxx-os-staging"
+readonly STAGING_PROJECT="maoxx-staging"
+readonly STAGING_ENV_FILE="${STAGING_ROOT}/.env.staging"
+readonly STAGING_COMPOSE_FILE="${STAGING_ROOT}/compose.staging.yml"
+# shellcheck disable=SC2034  # Shared by scripts that source this library.
+readonly STAGING_STORAGE="${STAGING_ROOT}/storage"
+# shellcheck disable=SC2034  # Shared by scripts that source this library.
+readonly STAGING_STATE_DIR="${STAGING_ROOT}/.staging-operations"
+readonly STAGING_LOCK_FILE="/tmp/maoxx-staging.lock"
+readonly PRODUCTION_PROJECT="maoxx-os"
+readonly REQUIRED_CHECK="CI / Quality Gate"
+# shellcheck disable=SC2034  # Shared by scripts that source this library.
+readonly -a COMPOSE=(docker compose --project-directory "${STAGING_ROOT}" --env-file "${STAGING_ENV_FILE}" -p "${STAGING_PROJECT}" -f "${STAGING_COMPOSE_FILE}")
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*" >&2; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "required command unavailable: $1"; }
+require_sha() { [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] || die "SHA must be 40 lowercase hexadecimal characters"; }
+require_exact_path() { [[ "$(realpath -e -- "$1")" == "$2" ]] || die "unexpected path: $1"; }
+
+reject_polluted_environment() {
+  local name
+  while IFS='=' read -r name _; do
+    case "$name" in
+      DATABASE_URL|POSTGRES_*|FEISHU_*|APP_ENV|COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES)
+        die "parent environment contains forbidden variable: ${name}" ;;
+    esac
+  done < <(env)
+}
+
+validate_env_file() {
+  local file="$1" owner mode links key value
+  local -A values=()
+  [[ -f "$file" && ! -L "$file" ]] || die "environment file must be a regular non-symlink"
+  links="$(stat -c '%h' -- "$file")"; [[ "$links" == 1 ]] || die "environment file must not be hard-linked"
+  owner="$(stat -c '%u' -- "$file")"; [[ "$owner" == "$(id -u)" || "$owner" == 0 ]] || die "invalid environment file owner"
+  mode="$(stat -c '%a' -- "$file")"; [[ "$mode" == 600 ]] || die "environment file mode must be 0600"
+  git -C "$STAGING_ROOT" ls-files --error-unmatch .env.staging >/dev/null 2>&1 && die ".env.staging must not be tracked"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=([^[:cntrl:]]*)$ ]] || die "invalid non-executable env-file syntax"
+    key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
+    # shellcheck disable=SC2016  # Match literal command-substitution syntax.
+    [[ "$value" != *'$('* && "$value" != *'`'* ]] || die "command syntax forbidden in env file"
+    case "$key" in POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD|DATABASE_URL|DEFAULT_USER_ID|APP_ENV|APP_TIMEZONE|LOCAL_STORAGE_ROOT|FEISHU_APP_ID|FEISHU_APP_SECRET) ;; *) die "unexpected env key: $key" ;; esac
+    [[ ! -v "values[$key]" ]] || die "duplicate env key: $key"
+    values["$key"]="$value"
+  done < "$file"
+  for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL DEFAULT_USER_ID APP_ENV APP_TIMEZONE LOCAL_STORAGE_ROOT FEISHU_APP_ID FEISHU_APP_SECRET; do
+    [[ -v "values[$key]" && -n "${values[$key]}" ]] || die "missing or empty env key: $key"
+  done
+  [[ "${values[APP_ENV]}" == staging ]] || die "APP_ENV must be staging"
+  [[ "${values[LOCAL_STORAGE_ROOT]}" == /app/storage ]] || die "LOCAL_STORAGE_ROOT must be /app/storage"
+  [[ "${values[DATABASE_URL]}" == postgresql+psycopg://*"@db:5432/${values[POSTGRES_DB]}" ]] || die "DATABASE_URL must target the staging db service"
+}
+
+acquire_lock() { exec 9>"$STAGING_LOCK_FILE"; flock -n 9 || die "another staging operation holds the lock"; }
+
+project_container_ids() {
+  docker ps -aq --filter "label=com.docker.compose.project=${1}" --filter "label=com.docker.compose.service=${2}"
+}
+require_single_container() {
+  local ids count
+  ids="$(project_container_ids "$1" "$2")"; count="$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l)"
+  [[ "$count" == 1 ]] || die "expected exactly one $1/$2 container"
+  printf '%s\n' "$ids"
+}
+require_no_staging_containers() {
+  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging instance already exists"
+  [[ -z "$(docker network ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging network already exists"
+  [[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${STAGING_PROJECT}")" ]] || die "a staging volume already exists"
+}
+
+production_snapshot() {
+  local output="$1" service id
+  : > "$output"
+  for service in db api feishu-worker; do
+    id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"
+    docker inspect --format '{{json .}}' "$id" | jq -c --arg service "$service" '{service:$service,id:.Id,image_id:.Image,created:.Created,started_at:.State.StartedAt,restart_count:.RestartCount,health:.State.Health.Status,network_ids:(.NetworkSettings.Networks|to_entries|map({key:.key,id:.value.NetworkID})|sort_by(.key)),mounts:(.Mounts|map({type:.Type,source:.Source,destination:.Destination,name:.Name})|sort_by(.destination)),ports:.NetworkSettings.Ports,project:.Config.Labels["com.docker.compose.project"]}' >> "$output"
+  done
+}
+require_production_healthy() {
+  local service id health
+  for service in db api feishu-worker; do
+    id="$(require_single_container "$PRODUCTION_PROJECT" "$service")"
+    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")"
+    [[ "$health" == healthy ]] || die "Production $service is not healthy"
+  done
+}
+compare_snapshots() { cmp -s -- "$1" "$2" || die "Production invariants changed"; }
+
+require_resources() {
+  local mem swap root docker_root docker_avail
+  mem="$(awk '/MemAvailable:/{print $2*1024}' /proc/meminfo)"; (( mem >= 1073741824 )) || die "MemAvailable is below 1 GiB"
+  swap="$(awk '/SwapFree:/{print $2*1024}' /proc/meminfo)"; (( swap >= 1073741824 )) || die "SwapFree is below 1 GiB"
+  root="$(df -PB1 / | awk 'NR==2{print $4}')"; (( root >= 5368709120 )) || die "root filesystem has less than 5 GiB free"
+  docker_root="$(docker info --format '{{.DockerRootDir}}')"; docker_avail="$(df -PB1 "$docker_root" | awk 'NR==2{print $4}')"
+  (( docker_avail >= 5368709120 )) || die "Docker data filesystem has less than 5 GiB free"
+}
+
+redact() { sed -E 's#(postgresql[^:]*://)[^@[:space:]]+@#\1[REDACTED]@#g; s/(PASSWORD|SECRET|TOKEN)=([^[:space:]]+)/\1=[REDACTED]/g'; }
+
+verify_ci_success() {
+  local sha="$1" json run_id
+  json="$(gh api "repos/Mxx1233/Maoxx-OS/actions/runs?head_sha=${sha}&per_page=100")"
+  run_id="$(jq -er --arg sha "$sha" '[.workflow_runs[] | select(.head_sha==$sha and .name=="CI")] | sort_by(.id,.run_attempt) | last | select(.status=="completed" and .conclusion=="success") | .id' <<<"$json")" || die "latest CI workflow run/attempt is not successful"
+  json="$(gh api "repos/Mxx1233/Maoxx-OS/commits/${sha}/check-runs?per_page=100")"
+  jq -e --arg sha "$sha" --arg name "$REQUIRED_CHECK" --arg run_id "$run_id" '[.check_runs[] | select(.head_sha==$sha and .name==$name and (.details_url | contains("/actions/runs/"+$run_id+"/")))] | sort_by(.id) | last as $r | ($r != null and $r.status=="completed" and $r.conclusion=="success")' <<<"$json" >/dev/null || die "required CI check is not successful for latest run"
+}
