@@ -25,6 +25,9 @@ class GitHubVerificationError(RuntimeError):
     pass
 
 
+QUALITY_GATE_NAME = "CI / Quality Gate"
+
+
 @dataclass(frozen=True)
 class GitHubEvidence:
     event_type: str
@@ -96,26 +99,40 @@ def verify_github_state(evidence: GitHubEvidence) -> None:
             [
                 "api",
                 f"repos/{evidence.repository}/commits/"
-                f"{evidence.target_sha}/check-runs",
+                f"{evidence.target_sha}/check-runs?filter=all&per_page=100",
             ]
         )
         if not isinstance(response, dict):
             raise GitHubVerificationError("GitHub check response invalid")
+        check_runs = response.get("check_runs")
+        if not isinstance(check_runs, list):
+            raise GitHubVerificationError("GitHub check response invalid")
         checks = [
             check
-            for check in response.get("check_runs", [])
+            for check in check_runs
             if isinstance(check, dict)
-            and check.get("name") == "CI / Quality Gate"
+            and check.get("name") == QUALITY_GATE_NAME
         ]
         if not checks:
             raise GitHubVerificationError("Quality Gate unavailable")
-        checks.sort(
-            key=lambda check: (
-                str(check.get("started_at") or ""),
-                int(check.get("id") or 0),
-            ),
-            reverse=True,
-        )
+
+        # GitHub returns check runs newest first.  Requesting filter=all keeps
+        # reruns visible; check-run IDs validate that the exact-name subset
+        # preserves that newest-first identity ordering even when a queued run
+        # has no started_at.  Malformed, duplicate, or ambiguous order fails
+        # closed instead of falling back to an older success.
+        check_ids = [check.get("id") for check in checks]
+        if any(
+            isinstance(check_id, bool)
+            or not isinstance(check_id, int)
+            or check_id < 1
+            for check_id in check_ids
+        ):
+            raise GitHubVerificationError("Quality Gate identity ambiguous")
+        if len(set(check_ids)) != len(check_ids) or check_ids != sorted(
+            check_ids, reverse=True
+        ):
+            raise GitHubVerificationError("Quality Gate ordering ambiguous")
         latest = checks[0]
         if latest.get("status") != "completed":
             raise GitHubVerificationError("Quality Gate is not completed")

@@ -52,34 +52,13 @@ class SupervisionCliTests(unittest.TestCase):
                 )
             )
 
-    @patch("app.supervision_cli._run_gh_json")
-    def test_newer_pending_gate_rejects_old_success(
-        self,
-        run_gh: MagicMock,
-    ) -> None:
-        run_gh.side_effect = [
-            {"sha": SHA},
-            {"number": 14, "headRefOid": SHA, "state": "OPEN"},
-            {
-                "check_runs": [
-                    {
-                        "id": 1,
-                        "name": "CI / Quality Gate",
-                        "status": "completed",
-                        "conclusion": "success",
-                        "started_at": "2026-08-07T10:00:00Z",
-                    },
-                    {
-                        "id": 2,
-                        "name": "CI / Quality Gate",
-                        "status": "in_progress",
-                        "conclusion": None,
-                        "started_at": "2026-08-07T11:00:00Z",
-                    },
-                ]
-            },
-        ]
-        with self.assertRaises(GitHubVerificationError):
+    def _verify_gate_runs(self, check_runs: list[dict]) -> None:
+        with patch("app.supervision_cli._run_gh_json") as run_gh:
+            run_gh.side_effect = [
+                {"sha": SHA},
+                {"number": 14, "headRefOid": SHA, "state": "OPEN"},
+                {"check_runs": check_runs},
+            ]
             verify_github_state(
                 GitHubEvidence(
                     "ci_passed",
@@ -88,6 +67,105 @@ class SupervisionCliTests(unittest.TestCase):
                     14,
                 )
             )
+            self.assertIn(
+                "check-runs?filter=all&per_page=100",
+                run_gh.call_args_list[-1].args[0][-1],
+            )
+
+    def test_newer_in_progress_gate_rejects_old_success(
+        self,
+    ) -> None:
+        checks = [
+            {
+                "id": 2,
+                "name": "CI / Quality Gate",
+                "status": "in_progress",
+                "conclusion": None,
+                "started_at": "2026-08-07T11:00:00Z",
+            },
+            {
+                "id": 1,
+                "name": "CI / Quality Gate",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-08-07T10:00:00Z",
+            },
+        ]
+        with self.assertRaises(GitHubVerificationError):
+            self._verify_gate_runs(checks)
+
+    def test_newer_pending_without_started_at_rejects_old_success(
+        self,
+    ) -> None:
+        for status in ("pending", "queued"):
+            with self.subTest(status=status):
+                checks = [
+                    {
+                        "id": 2,
+                        "name": "CI / Quality Gate",
+                        "status": status,
+                        "conclusion": None,
+                        "started_at": None,
+                    },
+                    {
+                        "id": 1,
+                        "name": "CI / Quality Gate",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "started_at": "2026-08-07T10:00:00Z",
+                    },
+                ]
+                with self.assertRaises(GitHubVerificationError):
+                    self._verify_gate_runs(checks)
+
+    def test_newer_failed_gate_rejects_old_success(self) -> None:
+        checks = [
+            {
+                "id": 2,
+                "name": "CI / Quality Gate",
+                "status": "completed",
+                "conclusion": "failure",
+            },
+            {
+                "id": 1,
+                "name": "CI / Quality Gate",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+        with self.assertRaises(GitHubVerificationError):
+            self._verify_gate_runs(checks)
+
+    def test_quality_gate_missing_or_ambiguous_fails_closed(self) -> None:
+        cases = (
+            [],
+            [
+                {
+                    "id": 2,
+                    "name": "CI / Quality Gate",
+                    "status": "completed",
+                    "conclusion": "success",
+                },
+                {
+                    "id": 3,
+                    "name": "CI / Quality Gate",
+                    "status": "completed",
+                    "conclusion": "success",
+                },
+            ],
+            [
+                {
+                    "id": None,
+                    "name": "CI / Quality Gate",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            ],
+        )
+        for checks in cases:
+            with self.subTest(checks=checks):
+                with self.assertRaises(GitHubVerificationError):
+                    self._verify_gate_runs(checks)
 
     def test_approval_is_persisted_before_message_send(self) -> None:
         events: list[str] = []

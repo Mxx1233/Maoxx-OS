@@ -247,9 +247,10 @@ def record_approval_decision(
         if request is None:
             return ApprovalOutcome("unknown_request")
 
-        database_now = db.execute(
-            select(func.current_timestamp())
-        ).scalar_one()
+        # PostgreSQL CURRENT_TIMESTAMP is fixed at transaction start.  This
+        # wall-clock read must happen after the row lock so time spent waiting
+        # for a competing decision cannot extend an approval's lifetime.
+        database_now = db.execute(select(func.clock_timestamp())).scalar_one()
         if database_now >= request.expires_at:
             return ApprovalOutcome("expired")
 

@@ -1,6 +1,7 @@
 import os
 import subprocess
 import threading
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -236,6 +237,104 @@ class DatabaseIntegrationTests(unittest.TestCase):
                     )
                 self.assertEqual(expired.code, "expired")
                 self.assertEqual(unknown.code, "unknown_request")
+
+                with session_factory() as session:
+                    lock_expiry_request = create_approval_request(
+                        session,
+                        user_id=user_id,
+                        action_code="production_deploy",
+                        repository="Example/Repository",
+                        pull_request_number=16,
+                        target_sha="e" * 40,
+                        target_environment="production",
+                        idempotency_key="lock-expiry-request",
+                        ttl_seconds=3,
+                    )
+
+                lock_holder = session_factory()
+                lock_holder.execute(
+                    text(
+                        "SELECT id FROM core.approval_requests "
+                        "WHERE id = :request_id FOR UPDATE"
+                    ),
+                    {"request_id": lock_expiry_request.id},
+                ).scalar_one()
+                decision_started = threading.Event()
+                lock_expiry_outcomes: list[str] = []
+                worker_details: dict[str, object] = {}
+
+                def decide_after_lock_wait() -> None:
+                    with session_factory() as session:
+                        worker_details["transaction_started_at"] = (
+                            session.execute(
+                                text("SELECT CURRENT_TIMESTAMP")
+                            ).scalar_one()
+                        )
+                        worker_details["backend_pid"] = session.execute(
+                            text("SELECT pg_backend_pid()")
+                        ).scalar_one()
+                        decision_started.set()
+                        outcome = record_approval_decision(
+                            session,
+                            command=ApprovalCommand(
+                                "approved",
+                                lock_expiry_request.id,
+                            ),
+                            feishu_event_id="event-lock-expiry",
+                            actor_user_id=user_id,
+                            actor_open_id="fake-approver-id",
+                        )
+                        lock_expiry_outcomes.append(outcome.code)
+
+                lock_wait_thread = threading.Thread(
+                    target=decide_after_lock_wait
+                )
+                lock_wait_thread.start()
+                self.assertTrue(decision_started.wait(timeout=5))
+                self.assertLess(
+                    worker_details["transaction_started_at"],
+                    lock_expiry_request.expires_at,
+                )
+
+                lock_observed = False
+                for _attempt in range(50):
+                    with session_factory() as observer:
+                        wait_event_type = observer.execute(
+                            text(
+                                "SELECT wait_event_type FROM pg_stat_activity "
+                                "WHERE pid = :pid"
+                            ),
+                            {"pid": worker_details["backend_pid"]},
+                        ).scalar_one_or_none()
+                    if wait_event_type == "Lock":
+                        lock_observed = True
+                        break
+                    time.sleep(0.02)
+                self.assertTrue(lock_observed)
+
+                while True:
+                    with session_factory() as observer:
+                        wall_clock = observer.execute(
+                            text("SELECT clock_timestamp()")
+                        ).scalar_one()
+                    if wall_clock >= lock_expiry_request.expires_at:
+                        break
+                    time.sleep(0.02)
+
+                lock_holder.commit()
+                lock_holder.close()
+                lock_wait_thread.join(timeout=10)
+                self.assertFalse(lock_wait_thread.is_alive())
+                self.assertEqual(lock_expiry_outcomes, ["expired"])
+                with session_factory() as session:
+                    persisted_after_expiry = session.execute(
+                        text(
+                            "SELECT count(*) FROM core.approval_decisions "
+                            "WHERE request_id = :request_id"
+                        ),
+                        {"request_id": lock_expiry_request.id},
+                    ).scalar_one()
+                self.assertEqual(persisted_after_expiry, 0)
 
                 with session_factory() as session:
                     concurrent_request = create_approval_request(
