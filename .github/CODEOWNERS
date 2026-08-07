@@ -5,6 +5,10 @@
 /.github/ @Mxx1233
 /alembic/ @Mxx1233
 /app/models/ @Mxx1233
+/app/supervision_cli.py @Mxx1233
+/app/services/approval_service.py @Mxx1233
+/app/services/feishu_messaging.py @Mxx1233
+/app/services/supervision_notifications.py @Mxx1233
 /docker-compose.yml @Mxx1233
 /compose.staging.yml @Mxx1233
 /.env.staging.example @Mxx1233
@@ -12,4 +16,5 @@
 /.github/workflows/** @Mxx1233
 /Dockerfile @Mxx1233
 /docs/adr/ @Mxx1233
+/docs/PHASE_1D_E_SUPERVISION.md @Mxx1233
 /AGENTS.md @Mxx1233

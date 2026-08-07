@@ -2,7 +2,7 @@ import unittest
 
 from sqlalchemy import Index, UniqueConstraint
 
-from app.models import Entity, RawInput
+from app.models import ApprovalDecision, ApprovalRequest, Entity, RawInput
 
 
 class CoreModelMetadataTests(unittest.TestCase):
@@ -52,6 +52,36 @@ class CoreModelMetadataTests(unittest.TestCase):
         self.assertEqual(
             unique_constraints["uq_raw_inputs_channel_message"],
             ("channel_code", "external_message_id"),
+        )
+
+    def test_approval_models_declare_idempotency_and_single_decision(
+        self,
+    ) -> None:
+        request_constraints = {
+            constraint.name: tuple(
+                column.name for column in constraint.columns
+            )
+            for constraint in ApprovalRequest.__table__.constraints
+            if isinstance(constraint, UniqueConstraint)
+        }
+        decision_constraints = {
+            constraint.name: tuple(
+                column.name for column in constraint.columns
+            )
+            for constraint in ApprovalDecision.__table__.constraints
+            if isinstance(constraint, UniqueConstraint)
+        }
+        self.assertEqual(
+            request_constraints["uq_approval_requests_idempotency_key"],
+            ("idempotency_key",),
+        )
+        self.assertEqual(
+            decision_constraints["uq_approval_decisions_request_id"],
+            ("request_id",),
+        )
+        self.assertEqual(
+            decision_constraints["uq_approval_decisions_feishu_event_id"],
+            ("feishu_event_id",),
         )
 
 

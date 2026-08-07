@@ -16,6 +16,16 @@
 
 当前文件运行目录挂载为 Local Storage；文字链路已经运行，媒体链路尚未实现。
 
+Phase 1D-E 在现有 Worker 内增加审批命令分流，并提供服务器本地 supervision CLI：
+
+```text
+read-only gh evidence -> local supervision CLI -> fixed Feishu message
+Feishu text event -> existing authorization -> approver/chat authorization
+  -> approval service -> append-only PostgreSQL decision
+```
+
+该链路只发送状态和记录决定，不调用 GitHub mutation、Production deployment 或 migration。无新公共 API、容器、webhook、poller 或 Staging Worker。
+
 ## 当前容器与网络
 
 - `db`：PostgreSQL 16，仅连接 internal 网络，不发布宿主机端口。
@@ -72,6 +82,8 @@ im.message.receive_v1
 授权校验和真实 p2p 白名单已在阶段 1C 部署验收。阶段 1D 在此基础上增加 Worker 连接状态、事件计数和回复失败的脱敏可观测性；不改变业务交互。
 
 Worker 连接状态来自飞书 SDK 的实际连接、断开和重连生命周期。状态仅保存在 Worker 进程内，重启后重新建立；它是运维信号，不是业务事实，因此当前不写入 PostgreSQL。API 不代理该状态，避免在尚无正式 API 认证时扩大运维信息暴露面。
+
+审批类文字在普通 Raw Input Layer 之前严格识别。`批准 <uuid>` 和 `拒绝 <uuid>` 仅在 tenant、sender、chat type、独立 approver allowlist 和固定 supervision chat 全部匹配时进入事务；有效或畸形的审批类命令均不写入 `core.raw_inputs`。审批事实分为 request 和 append-only decision，使用数据库时间、行锁、唯一约束和 trigger 保证过期、幂等与并发安全。
 
 ### API 流
 

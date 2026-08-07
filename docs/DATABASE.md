@@ -2,11 +2,15 @@
 
 ## 当前数据库
 
-业务 schema 为 `core`，当前 Alembic revision 为 `0001_core_foundation`。
+业务 schema 为 `core`。运行中 Production/accepted Staging revision 为 `0001_core_foundation`；Phase 1D-E 代码新增尚未部署的 additive head `0002_phase_1d_e_approvals`。
 
 - `core.users`：用户资料和用户级默认设置。
 - `core.entities`：跨模块通用实体骨架。
 - `core.raw_inputs`：来自 API 或飞书的原始输入，使用 `(channel_code, external_message_id)` 去重。
+- `core.approval_requests`：Phase 1D-E 的 action/SHA/environment/时限审批请求，以 idempotency key 去重。
+- `core.approval_decisions`：每请求唯一的 approved/rejected 只追加决定，保存 actor user、完整 SHA-256 身份指纹和唯一飞书 event ID。
+
+`approval_decisions` 由数据库 trigger 禁止 UPDATE/DELETE，两个表的用户和请求外键均为 `ON DELETE RESTRICT`。决定事务锁定请求行并使用数据库时间判断过期。Phase 1D-E 只记录决定，不执行 merge 或部署。
 
 ## 阶段 2 设计范围
 
@@ -71,4 +75,4 @@
 
 ## 当前迁移注意事项
 
-阶段 1C 已让 ORM 准确声明 `0001_core_foundation` 创建的索引与唯一约束，且当前工作树的 `alembic check` 无漂移。未修改已执行的 `0001` 文件；阶段 1C 验收前仍不得创建阶段 2 表。
+阶段 1C 已让 ORM 准确声明 `0001_core_foundation` 创建的索引与唯一约束。Phase 1D-E 未修改已执行的 `0001`；additive `0002` 已在临时 PostgreSQL 验证 upgrade/head/check、索引、约束、并发和 append-only trigger。Production migration 必须在合并后备份及单独批准，不执行自动 downgrade，也不创建阶段 2 表。

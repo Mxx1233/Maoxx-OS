@@ -106,11 +106,17 @@ ruff format --check app tests
 
 ## Phase 1D-D Staging
 
-Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [Phase 1D-D Staging](STAGING.md)。当前状态仅为 `implemented_pending_verification`。CI 会验证 Compose、ShellCheck、静态测试、Secret/禁止操作扫描和 `.dockerignore`，但这不代表服务器 Staging 已部署。在 PR 合并、服务器 post-merge 验收和单独人工批准之前，不得创建目录、构建镜像、启动服务或执行 migration。Production 的现有 `docker-compose.yml` 和运行状态不由 Staging 流程修改。
+Staging 的固定路径、批准链、环境隔离、部署与停止约束见 [Phase 1D-D Staging](STAGING.md)。Phase 1D-D 已通过真实运行验收并为 `accepted`；db/api 保持运行，Worker 关闭。后续阶段不得无独立批准重建、停止或修改该验收环境。Production 的现有 `docker-compose.yml` 和运行状态不由 Staging 流程修改。
 
 部署操作者必须先把固定 checkout 明确置于批准 SHA，并保持 `git status --porcelain` 完全为空；部署脚本只验证，不执行 checkout、reset 或 clean。部分 `compose up` 失败由预先注册的精确 project-label 清理处理，仅执行普通 `down` 并保留数据库 volume。
 
 Docker build 只使用批准 SHA 的 `git archive` 临时 context 和其中的 Dockerfile，不使用 `/opt/maoxx-os-staging` 作为 build context。临时 context 只包含镜像所需 tracked paths，设为只读并由 EXIT trap 清理；不要手工复制工作树内容到该目录。
+
+## Phase 1D-E 飞书监督审批
+
+实现和命令见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。当前代码为 `implemented_pending_verification`，不要在本 PR 阶段运行 CLI、Production migration 或真实飞书发送。
+
+合并后必须先完成精确 merge-SHA CI、Production 备份/恢复点和 migration 人工审查；再单独批准 `0002` forward migration、Worker rollout 及固定非敏感消息测试。若主动发送权限、授权、数据库或飞书查询状态不明确，立即停止。失败时不自动 downgrade，不删除审批审计数据。
 
 ## Worker 回复策略
 

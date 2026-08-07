@@ -1022,17 +1022,24 @@ class StagingScriptTests(unittest.TestCase):
                 self.assertIn("identities overlap", failed.stderr)
 
     def test_phase_state_consistency(self) -> None:
-        for name in (
-            "ROADMAP.md",
-            "PROJECT_STATUS.md",
-            "PHASE_1D_CONTROL_PLANE.md",
-            "CHANGELOG.md",
-            "STAGING.md",
-        ):
-            text = (ROOT / "docs" / name).read_text()
-            self.assertIn("implemented_pending_verification", text, name)
-            self.assertIn("in_progress", text, name)
-            self.assertIn("not_started", text, name)
+        documents = {
+            name: (ROOT / "docs" / name).read_text()
+            for name in (
+                "ROADMAP.md",
+                "PROJECT_STATUS.md",
+                "PHASE_1D_CONTROL_PLANE.md",
+                "CHANGELOG.md",
+                "STAGING.md",
+                "PHASE_1D_E_SUPERVISION.md",
+            )
+        }
+        combined = "\n".join(documents.values())
+        self.assertIn("Phase 1D-D", combined)
+        self.assertIn("accepted", combined)
+        self.assertIn("Phase 1D-E", combined)
+        self.assertIn("implemented_pending_verification", combined)
+        self.assertIn("in_progress", combined)
+        self.assertIn("not_started", combined)
 
     def test_markdown_internal_links_exist(self) -> None:
         import re

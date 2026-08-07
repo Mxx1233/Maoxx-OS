@@ -23,6 +23,19 @@
 
 代码采用默认拒绝策略，chat type 默认仅允许 `p2p`。服务器真实白名单和新 Worker 尚未部署验收，因此不能把授权写成生产已生效。成功确认的新实现固定回复“已记录。”，群聊和其他场景均不回显敏感原文。
 
+## Phase 1D-E 监督审批
+
+Phase 1D-E 复用现有 WebSocket Worker，支持固定监督事件和严格文本审批：
+
+```text
+批准 <request-uuid>
+拒绝 <request-uuid>
+```
+
+审批命令在普通输入持久化前分流，并额外要求独立 approver allowlist 和固定 supervision chat。决定写入 append-only 审计表，不触发 GitHub 或部署动作。主动通知由服务器本地 CLI 发起，可选使用只读 `gh` 核实精确 commit、PR head 和 `CI / Quality Gate`。
+
+该能力当前为 `implemented_pending_verification`。Production migration、Worker 新版本和主动消息权限均未部署/验证；真实飞书测试必须在合并后单独批准。完整说明见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
+
 ## 后续能力
 
 - 图片、视频和文件接收及安全下载。

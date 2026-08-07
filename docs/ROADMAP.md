@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D-D 为 `implemented_pending_verification`，不得进入 Phase 1D-E 或 Phase 2A。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B、Phase 1D-C 和 Phase 1D-D 为 `accepted`；Phase 1D-E 为 `implemented_pending_verification`，不得进入 Phase 1D-F 或 Phase 2A。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -47,18 +47,20 @@
 ### Phase 1D-C：Codex Cloud
 
 - 目标：连接仓库、读取开发规则、建立无生产密钥的非生产环境，并完成只读任务、测试分支和测试 PR。
-- 当前状态：`accepted`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据，只读验证成功并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 和 Pull Request #8 已成功发布和更新；最新 `pull_request` synchronize event 自动触发的五个 CI job 全部通过，包括 required `CI / Quality Gate`。没有绕过门禁、直接写 `main`、自动批准或合并，也未访问 Production；不得进入 Phase 1D-D。
+- 当前状态：`accepted`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据，只读验证成功并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 和 Pull Request #8 已成功发布和更新；最新 `pull_request` synchronize event 自动触发的五个 CI job 全部通过，包括 required `CI / Quality Gate`。没有绕过门禁、直接写 `main`、自动批准或合并，也未访问 Production；该验收本身不授权自动进入后续阶段。
 - 详细边界：[Codex Cloud repository workflow](CODEX_CLOUD.md)。
 
 ### Phase 1D-D：Staging
 
 - 目标：建立与 Production 隔离、独立数据库和 storage、可按需启停且适应 2 CPU/2 GB RAM 的 Staging，并完成 migration 和健康验收。
-- 当前状态：`implemented_pending_verification`；仅完成 Compose、配置示例、安全脚本、静态 CI 与文档代码实现。未部署 Staging、未执行 migration、未测试 Worker，也未修改 Production。首次部署须在 PR 合并和服务器 post-merge 验收后单独人工批准。
+- 当前状态：`accepted`；精确批准 SHA 的 immutable build、retained PostgreSQL volume 复用、DB/API 健康、Alembic 幂等、HTTP health、network/volume/port/mount/image 隔离和 Production 前后不变量均已通过真实运行验收。Staging 保持运行，Worker 保持关闭，Production 未变化。
 - 详细边界：[Phase 1D-D Staging](STAGING.md)。
 
 ### Phase 1D-E：Feishu Supervision and Approval
 
 - 目标：通过飞书查看任务/计划/CI/PR/Staging，批准或退回计划、合并和 Production 部署，并具备身份校验、防重复审批和审计记录。
+- 当前状态：`implemented_pending_verification`；已实现固定状态通知、本地只读 GitHub 验证 CLI、严格文字审批命令、独立审批人 allowlist、时限/幂等/并发事务和 append-only 审计模型。未执行 Production migration、未部署 Worker 新版本，也未验证真实主动消息权限。
+- 详细边界：[Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
 
 ### Phase 1D-F：Controlled Deployment
 
