@@ -6,6 +6,7 @@
 
 ### Corrected
 
+- 允许 Phase 1D-D preflight 在零 container/network 且唯一 retained volume 的 project/volume labels 与 Compose identity 全部精确匹配时安全重试；首次空状态继续允许，任何额外、未知、Production、unlabeled、错误 label 或查询失败状态均 fail closed。保留的 PostgreSQL volume 不删除或重建，后续批准部署将复用它验证 `alembic upgrade head` 幂等性。
 - 修正 Phase 1D-D 首次 Staging 运行验收发现的 Docker Compose dotted-label Go-template 访问错误，改为精确 map indexing 并新增正确、错误及缺失 label 的 fail-closed 回归测试。首次运行已到达健康 DB/API 且 Alembic upgrade/current/heads/check 通过；验证失败后普通 Compose `down` 安全清理成功，Production 不变量未变化，独立 PostgreSQL volume 已保留。Phase 1D-D 仍为 `implemented_pending_verification`，合并后必须重新运行验收。
 - 将 Phase 1D 从错误的 `accepted` 纠正为 `in_progress`；已交付能力重新定义为 Phase 1D-0：Server Observability and Execution Foundation。
 - 记录 Phase 1D-A 至 1D-F 的 Cloud Development Control Plane 缺口、实施顺序和验收标准。

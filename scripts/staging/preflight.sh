@@ -21,7 +21,7 @@ verify_ci_success "$target_sha"
 [[ "$(realpath -m -- "$STAGING_STORAGE")" == "$STAGING_STORAGE" ]] || die "invalid staging storage path"
 case "$(realpath -m -- "$STAGING_STORAGE")/" in /opt/maoxx-os/storage/*) die "storage overlaps Production";; esac
 ss -ltnH 'sport = :18000' | grep -q . && die "127.0.0.1:18000 is in use"
-require_no_staging_containers
+require_valid_predeploy_staging_state
 require_production_healthy
 require_resources
 pgrep -af 'docker (compose )?build|buildx build' | grep -v "$$" | grep -q . && die "another Docker build process is active"
