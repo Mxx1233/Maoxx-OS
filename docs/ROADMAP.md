@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 和 Phase 1D-B 为 `accepted`，Phase 1D-C 为 `implemented_pending_verification`；不得进入 Phase 1D-D 或 Phase 2A。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；不得进入 Phase 1D-D 或 Phase 2A。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -47,7 +47,7 @@
 ### Phase 1D-C：Codex Cloud
 
 - 目标：连接仓库、读取开发规则、建立无生产密钥的非生产环境，并完成只读任务、测试分支和测试 PR。
-- 当前状态：`implemented_pending_verification`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据，只读验证成功并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 和 Pull Request #8 已成功发布；CI 已手动触发，PostgreSQL Integration 与 Docker Build 成功，Quality 与 Unit Tests 因外部 GitHub-hosted runner outage 无法取得 runner，required `CI / Quality Gate` 保持 blocked。没有绕过门禁；最终验收等待 GitHub Actions 服务恢复，不得进入 Phase 1D-D。
+- 当前状态：`accepted`；GitHub 连接仅授权 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据，只读验证成功并保持 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 和 Pull Request #8 已成功发布和更新；最新 `pull_request` synchronize event 自动触发的五个 CI job 全部通过，包括 required `CI / Quality Gate`。没有绕过门禁、直接写 `main`、自动批准或合并，也未访问 Production；不得进入 Phase 1D-D。
 - 详细边界：[Codex Cloud repository workflow](CODEX_CLOUD.md)。
 
 ### Phase 1D-D：Staging
