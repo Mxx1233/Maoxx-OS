@@ -9,15 +9,18 @@
 - 将 Phase 1D 从错误的 `accepted` 纠正为 `in_progress`；已交付能力重新定义为 Phase 1D-0：Server Observability and Execution Foundation。
 - 记录 Phase 1D-A 至 1D-F 的 Cloud Development Control Plane 缺口、实施顺序和验收标准。
 - 删除未推送的错误本地 `phase1d-accepted` tag；保留已验证的服务器功能提交。
-- 记录 Public GitHub 仓库和 Active `Protect main` Ruleset 的已确认状态；required status checks 留待 Phase 1D-B。
+- 记录 Public GitHub 仓库和 Active `Protect main` Ruleset 的已确认状态；`CI / Quality Gate` 是唯一 configured required status check。
 
 ### Accepted
 
 - Phase 1D-A GitHub Development Governance 已通过用户验收：PR #2、#3、#4 独立合并，main Ruleset、模板、CODEOWNERS 和 migration 人工审查规则均已验证。
 - Phase 1D-B GitHub Actions CI 已通过验收：五个 job 全绿，`CI / Quality Gate` 已成为唯一 required check，临时失败与普通修复 commit 已验证失败阻断和恢复路径。
+- Phase 1D-C Codex Cloud workflow 已通过验收：仓库连接和最小权限边界、非生产环境、zero-diff 只读任务、Cloud 分支和 PR #8 创建/更新均已验证；最新 synchronize event 自动触发的五个 CI job 全绿，required `CI / Quality Gate` 通过。
 
 ### Added
 
+- Phase 1D-C Codex Cloud repository workflow 文档：GitHub 连接仅限 `Mxx1233/Maoxx-OS`，Cloud 环境为无 Secrets 或生产凭据且禁用 agent internet access 的非生产环境；成功的只读验证保持 zero file diff。
+- Phase 1D-C Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建和更新；未绕过任何 CI 要求、直接写 `main`、自动批准或合并，也未访问 Production。
 - Phase 1D-A Pull Request 模板、Codex task Issue 表单、Issue 配置和 CODEOWNERS。
 - GitHub 开发治理、main Ruleset、任务分支、PR 和 migration 人工审查规则。
 - Phase 1D-B 只读 GitHub Actions workflow：Python compile、Ruff、标准库测试、临时 PostgreSQL migration/integration、Compose config、Docker build 和统一 `CI / Quality Gate`。
@@ -25,7 +28,8 @@
 
 ### Changed
 
-- Phase 1D-A 和 Phase 1D-B 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+- Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
+- 文档-only Pull Request 同样受 required `CI / Quality Gate` 治理；PR #8 最新 synchronize event 已自动触发并通过全部五个 CI job。
 
 ### Known issues
 
