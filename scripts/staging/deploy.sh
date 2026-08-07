@@ -29,6 +29,16 @@ start_staging_db() {
   "${COMPOSE[@]}" up -d db
 }
 
+run_staging_verification() {
+  "${STAGING_ROOT}/scripts/staging/verify.sh"
+}
+
+start_staging_api_and_verify() {
+  "${COMPOSE[@]}" up -d api
+  wait_container_healthy "$STAGING_PROJECT" api 75 2 || return
+  run_staging_verification
+}
+
 main() {
   local target_sha="${1:-}" image image_id
   require_sha "$target_sha"
@@ -63,8 +73,7 @@ main() {
   "${COMPOSE[@]}" run --rm api alembic current
   "${COMPOSE[@]}" run --rm api alembic heads
   "${COMPOSE[@]}" run --rm api alembic check
-  "${COMPOSE[@]}" up -d api
-  "${STAGING_ROOT}/scripts/staging/verify.sh"
+  start_staging_api_and_verify
   deploy_succeeded=1
 }
 

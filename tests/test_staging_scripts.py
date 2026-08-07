@@ -592,6 +592,158 @@ class StagingScriptTests(unittest.TestCase):
                     )
                     self.assertIn("failed to inspect container", result.stderr)
 
+    def test_api_readiness_wait_is_bounded_and_fail_closed(self) -> None:
+        def run_wait(
+            states: str,
+            *,
+            attempts: int = 3,
+            discovery_failure: bool = False,
+            inspect_failure_call: int = 0,
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fake_bin = root / "bin"
+                fake_bin.mkdir()
+                counter = root / "inspect-count"
+                docker = fake_bin / "docker"
+                docker.write_text(
+                    "#!/usr/bin/env bash\n"
+                    "set -euo pipefail\n"
+                    'case "${1:-}" in\n'
+                    "  ps)\n"
+                    '    [[ "${STAGING_TEST_DISCOVERY_FAILURE:-0}" != 1 ]] || exit 21\n'
+                    "    printf 'api-container\\n'\n"
+                    "    ;;\n"
+                    "  inspect)\n"
+                    "    count=0\n"
+                    '    [[ ! -f "$STAGING_TEST_COUNTER" ]] || count="$(<"$STAGING_TEST_COUNTER")"\n'
+                    "    count=$((count + 1))\n"
+                    '    printf \'%s\\n\' "$count" > "$STAGING_TEST_COUNTER"\n'
+                    '    [[ "$count" != "${STAGING_TEST_INSPECT_FAILURE_CALL:-0}" ]] || exit 22\n'
+                    "    IFS=',' read -r -a states <<< \"$STAGING_TEST_STATES\"\n"
+                    "    index=$((count - 1))\n"
+                    "    (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))\n"
+                    "    printf '%s\\n' \"${states[$index]}\"\n"
+                    "    ;;\n"
+                    "  *) exit 23 ;;\n"
+                    "esac\n"
+                )
+                docker.chmod(0o755)
+                result = self.run_lib(
+                    f"wait_container_healthy maoxx-staging api {attempts} 0",
+                    env={
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                        "STAGING_TEST_COUNTER": str(counter),
+                        "STAGING_TEST_STATES": states,
+                        "STAGING_TEST_DISCOVERY_FAILURE": (
+                            "1" if discovery_failure else "0"
+                        ),
+                        "STAGING_TEST_INSPECT_FAILURE_CALL": str(
+                            inspect_failure_call
+                        ),
+                    },
+                )
+                count = int(counter.read_text()) if counter.exists() else 0
+                return result, count
+
+        cases = (
+            (
+                "starting then healthy",
+                "running|starting,running|healthy",
+                0,
+                2,
+            ),
+            ("healthy immediately", "running|healthy", 0, 1),
+            (
+                "starting then unhealthy",
+                "running|starting,running|unhealthy",
+                1,
+                2,
+            ),
+            ("container exits", "running|starting,exited|starting", 1, 2),
+        )
+        for name, states, expected_status, expected_inspects in cases:
+            with self.subTest(state_sequence=name):
+                result, count = run_wait(states)
+                self.assertEqual(result.returncode == 0, expected_status == 0)
+                self.assertEqual(count, expected_inspects)
+
+        inspect_failure, count = run_wait(
+            "running|starting,running|healthy", inspect_failure_call=1
+        )
+        self.assertNotEqual(inspect_failure.returncode, 0)
+        self.assertEqual(count, 1)
+        self.assertIn("failed to inspect", inspect_failure.stderr)
+
+        discovery_failure, count = run_wait(
+            "running|healthy", discovery_failure=True
+        )
+        self.assertNotEqual(discovery_failure.returncode, 0)
+        self.assertEqual(count, 0)
+        self.assertIn("failed to", discovery_failure.stderr)
+
+        timeout, count = run_wait("running|starting", attempts=3)
+        self.assertNotEqual(timeout.returncode, 0)
+        self.assertEqual(count, 3)
+        self.assertIn("timed out", timeout.stderr)
+
+    def test_verification_runs_only_after_api_readiness(self) -> None:
+        deploy = (ROOT / "scripts/staging/deploy.sh").read_text()
+        self.assertLess(
+            deploy.index('"${COMPOSE[@]}" up -d api'),
+            deploy.index('wait_container_healthy "$STAGING_PROJECT" api'),
+        )
+        self.assertLess(
+            deploy.index('wait_container_healthy "$STAGING_PROJECT" api'),
+            deploy.index(
+                "run_staging_verification",
+                deploy.index("start_staging_api_and_verify"),
+            ),
+        )
+
+        for readiness_status in (0, 1):
+            with (
+                self.subTest(readiness_status=readiness_status),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                fake_bin = root / "bin"
+                fake_bin.mkdir()
+                log = root / "order.log"
+                docker = fake_bin / "docker"
+                docker.write_text(
+                    "#!/usr/bin/env bash\n"
+                    'printf \'docker:%s\\n\' "$*" >> "$STAGING_TEST_LOG"\n'
+                )
+                docker.chmod(0o755)
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        f'source "{ROOT / "scripts/staging/deploy.sh"}"; '
+                        'wait_container_healthy() { printf \'readiness\\n\' >> "$STAGING_TEST_LOG"; return "$STAGING_TEST_READINESS_STATUS"; }; '
+                        "run_staging_verification() { printf 'verify\\n' >> \"$STAGING_TEST_LOG\"; }; "
+                        "start_staging_api_and_verify",
+                    ],
+                    env={
+                        **os.environ,
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                        "STAGING_TEST_LOG": str(log),
+                        "STAGING_TEST_READINESS_STATUS": str(readiness_status),
+                    },
+                    capture_output=True,
+                    text=True,
+                )
+                calls = log.read_text().splitlines()
+                self.assertTrue(calls[0].endswith(" up -d api"))
+                self.assertEqual(calls[1], "readiness")
+                if readiness_status == 0:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(calls[2:], ["verify"])
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(calls[2:], [])
+
     def test_partial_compose_up_failure_runs_safe_down(self) -> None:
         for resource in ("container", "network", "volume"):
             with (

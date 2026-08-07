@@ -6,6 +6,7 @@
 
 ### Corrected
 
+- Phase 1D-D Staging 在既有 API Docker healthcheck 之上增加有界 readiness gate：API 启动后仅在精确 Compose service container 达到 `healthy` 时才运行 `verify.sh`，container discovery/inspect 失败、退出、`unhealthy` 或超时均 fail closed，不以固定 sleep 取代 readiness。此前运行已通过 build、DB、Alembic、隔离、port、mount 与 image-ID 检查，但 API 启动后立即执行的首次 `/health` 返回 empty reply；Production 未变化且 retained PostgreSQL volume 保留，Phase 1D-D 仍为 `implemented_pending_verification`。
 - 修正 Phase 1D-D 第二次 Staging 运行验收发现的 Docker resource set 换行解析错误：retained PostgreSQL volume 复用、DB/API 启动和 Alembic 幂等检查均通过，但 Docker template 的 `println` 与 CLI 尾换行产生空 network 记录并导致 false negative；现统一删除空行并确定性 `sort -u` 后再执行严格 network expected-set 与 network/volume disjointness 检查，并要求每个容器的 resource identity inspect 独立成功，禁止后续成功掩盖较早失败或产生不完整集合。失败后安全清理成功、Production 未变化、retained volume 保留；Phase 1D-D 仍为 `implemented_pending_verification`，合并后必须重新运行验收。
 - 允许 Phase 1D-D preflight 在零 container/network 且唯一 retained volume 的 project/volume labels 与 Compose identity 全部精确匹配时安全重试；首次空状态继续允许，任何额外、未知、Production、unlabeled、错误 label 或查询失败状态均 fail closed。保留的 PostgreSQL volume 不删除或重建，后续批准部署将复用它验证 `alembic upgrade head` 幂等性。
 - 修正 Phase 1D-D 首次 Staging 运行验收发现的 Docker Compose dotted-label Go-template 访问错误，改为精确 map indexing 并新增正确、错误及缺失 label 的 fail-closed 回归测试。首次运行已到达健康 DB/API 且 Alembic upgrade/current/heads/check 通过；验证失败后普通 Compose `down` 安全清理成功，Production 不变量未变化，独立 PostgreSQL volume 已保留。Phase 1D-D 仍为 `implemented_pending_verification`，合并后必须重新运行验收。
