@@ -12,7 +12,12 @@
 
 `approval_decisions` 由数据库 trigger 禁止 UPDATE/DELETE，两个表的用户和请求外键均为 `ON DELETE RESTRICT`。决定事务锁定请求行并使用数据库时间判断过期。Phase 1D-E 只记录决定，不执行 merge 或部署。
 
-Phase 1D-F 增加 deployment intents/artifacts/state events、Staging acceptance 与 invalidation、approval bindings/consumptions、Production lease、evidence 和 rollback linkage。当前 lease 是唯一可更新运维表；其余 Phase 1D-F 审计表均由 trigger 禁止 UPDATE/DELETE。一次性 consumption 与进入 deploying state 在同一事务建立。
+Phase 1D-F 增加 deployment intents/artifacts/state events、Staging acceptance 与 invalidation、
+approval bindings/consumptions、Production lease、唯一 execution attempt、evidence 和 rollback
+linkage。当前 lease 是唯一可更新运维表；其余 Phase 1D-F 审计表均由 trigger 禁止
+UPDATE/DELETE。lease 固定为 server-derived `production:global` domain，并带递增 fencing
+token；过期 owner 必须由 authoritative runtime reconciliation 安全确认后才可接管。一次性
+consumption 与进入 deploying state/唯一 execution identity 在同一事务建立。
 
 ## 阶段 2 设计范围
 

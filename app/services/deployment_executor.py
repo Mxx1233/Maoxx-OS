@@ -1,50 +1,81 @@
-from dataclasses import dataclass
-from typing import Protocol
+"""The only production-mutation boundary for Phase 1D-F.
 
-from app.services.deployment_policy import (
-    validate_immutable_artifact,
-    validate_service_set,
+It does not accept a caller-built execution object.  Each invocation reloads
+authoritative database state and marks one persisted execution attempt before
+the fencing-aware adapter is allowed to mutate a runtime.
+"""
+
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from app.services.deployment_authority import (
+    AuthoritativeRuntimeObserver,
+    FencingAwareExecutionAdapter,
+    ProtectedMainCiVerifier,
 )
 from app.services.deployment_service import (
-    ExecutionResult,
-    ValidatedExecution,
+    DeploymentGateError,
+    prepare_authoritative_mutation,
+    reconcile_authoritative_execution,
 )
-
-
-class ExecutionAdapter(Protocol):
-    def deploy_immutable(
-        self,
-        *,
-        image_reference: str,
-        artifact_digest: str,
-        services: tuple[str, ...],
-        deployment_id: str,
-        target_sha: str,
-        environment: str,
-        action_code: str,
-        expected_current_revision: str | None,
-    ) -> ExecutionResult: ...
 
 
 @dataclass(frozen=True)
 class ControlledExecutionBoundary:
-    """The only boundary permitted to invoke a Production adapter."""
+    """Database-authoritative, fenced executor boundary."""
 
-    adapter: ExecutionAdapter
+    adapter: FencingAwareExecutionAdapter
+    ci_verifier: ProtectedMainCiVerifier
+    runtime_observer: AuthoritativeRuntimeObserver
 
-    def deploy(self, execution: ValidatedExecution) -> ExecutionResult:
-        validate_immutable_artifact(
-            digest=execution.artifact_digest,
-            image_reference=execution.image_reference,
+    def execute(
+        self,
+        db: Session,
+        *,
+        deployment_id: UUID,
+        execution_id: UUID,
+        executor_identity: str,
+        fencing_token: int,
+    ) -> str:
+        execution = prepare_authoritative_mutation(
+            db,
+            deployment_id=deployment_id,
+            execution_id=execution_id,
+            executor_identity=executor_identity,
+            fencing_token=fencing_token,
+            ci_verifier=self.ci_verifier,
+            runtime_observer=self.runtime_observer,
         )
-        services = validate_service_set(execution.services)
-        return self.adapter.deploy_immutable(
+        if not self.adapter.verify_fencing_token(
+            deployment_id=execution.deployment_id,
+            execution_id=execution.execution_id,
+            fencing_token=execution.fencing_token,
+        ):
+            raise DeploymentGateError("executor_fencing_rejected")
+        self.adapter.deploy_immutable(
+            deployment_id=execution.deployment_id,
+            execution_id=execution.execution_id,
+            fencing_token=execution.fencing_token,
             image_reference=execution.image_reference,
             artifact_digest=execution.artifact_digest,
-            services=services,
-            deployment_id=str(execution.deployment_id),
             target_sha=execution.target_sha,
-            environment=execution.environment,
-            action_code=execution.action_code,
+            services=execution.services,
             expected_current_revision=execution.expected_current_revision,
         )
+        return reconcile_authoritative_execution(
+            db,
+            deployment_id=deployment_id,
+            execution_id=execution_id,
+            executor_identity=executor_identity,
+            fencing_token=fencing_token,
+            ci_verifier=self.ci_verifier,
+            runtime_observer=self.runtime_observer,
+            evidence_key=f"reconcile-{execution_id}",
+        )
+
+    def deploy(self, *args, **kwargs) -> str:
+        """Reject the former caller-constructed execution API."""
+        del args, kwargs
+        raise DeploymentGateError("caller_constructed_execution_forbidden")

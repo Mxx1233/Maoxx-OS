@@ -29,6 +29,8 @@ Staging 验证一个构建、Production 再构建另一个。
 - `core.deployment_approval_bindings`：approval request 与 deployment/digest 的精确绑定；
 - `core.deployment_approval_consumptions`：一次性 approval consumption 与状态事件；
 - `core.deployment_locks`：Production conflict domain 的当前 bounded lease；
+- `core.deployment_execution_attempts`：每个 deployment 唯一的持久 execution
+  identity；lost-ack retry 只作 reconciliation，不能重发 mutation；
 - `core.deployment_evidence`：备份、resource、lock、executor、health、reconciliation
   和 Feishu reference；
 - `core.deployment_rollbacks`：failed deployment、current revision 和 rollback target。
@@ -82,20 +84,21 @@ fingerprint。下列情况不能进入 Production：
 
 ## 独立审批和一次性消费
 
-Production approval request 通过 immutable binding 精确关联 deployment UUID、
+Production approval request 由已 frozen 的 immutable intent 在同一事务创建，并通过
+immutable binding 精确关联 deployment UUID、
 repository、SHA、environment、action code 和 artifact digest。开始部署的数据库事务
 会锁定 intent、approval request/decision 和 Production lease，并重新读取 PostgreSQL
 `clock_timestamp()`。事务同时：
 
 1. 验证 approved、未过期、未消费和精确 binding；
-2. 验证 approver fingerprint 与 requester fingerprint 不同；
+2. 通过 canonical trusted human identity 验证 approver 与 requester 不同；caller
+   fingerprint 不能作为身份证据，缺失/歧义 identity fail closed；
 3. 插入唯一 consumption；
 4. 插入 `PRODUCTION_DEPLOYING` 或 `ROLLBACK_DEPLOYING` state event；
 5. 记录 executor-start evidence。
 
-任一步失败全部回滚。ack 丢失后的相同 owner retry 会从 consumption/state 恢复
-`already_started`，不会第二次消费或生成第二个 deploying event。终态 retry 返回
-`approval_consumed`。
+任一步失败全部回滚。ack 丢失后的 retry 只读取 authoritative runtime reconciliation
+status；不会第二次消费、生成第二个 deploying event 或再次调用 adapter。
 
 ## Production gates
 
@@ -128,22 +131,29 @@ resource evidence 复用已接受的精确规则：7 个约五秒间隔样本、
 MemAvailable 至少 1 GiB、每个样本至少 960 MiB、每个 SwapFree 至少 1.25 GiB，
 root/Docker data 每个样本至少 5 GiB；缺失或畸形 fail closed。
 
-`core.deployment_locks` 对 `production` conflict domain 原子获取 bounded lease。只有
-owner 可续租或释放；其他 owner 在 lease 有效时收到 conflict。过期 lease 可由新
-deployment 安全接管，并写 append-only `stale_lock_reconciled` evidence。两个
-Production deployment 不能同时取得锁。
+`core.deployment_locks` 使用 server-derived 的唯一 `production:global` conflict
+domain；调用方不能选择另一 domain 绕过冲突。lease 有递增 fencing token，所有
+mutation-capable adapter 调用都携带并验证该 token。过期 lease 不可直接接管：
+authoritative runtime observer 必须先证明旧 actor 不在执行中，记录 prior owner/token、
+reconciliation evidence/时间，再可写入 new owner/new token。旧 token 会被拒绝，两个
+executor（包括 lease expiry 后）不能同时修改 Production。
 
 ## 专用执行边界和 reconciliation
 
-`ControlledExecutionBoundary` 只接受数据库门禁事务产生的 `ValidatedExecution`。
+`ControlledExecutionBoundary` 没有 caller-constructible authorization API。每次 adapter
+调用前，它在同一 authoritative DB boundary 重新锁定/验证 intent、artifact、Staging
+acceptance、approval/consumption、service/config、fresh CI/backup/resource evidence、
+execution identity 和 fencing token；随后由 runtime observer 证明 mutation 尚未开始。
 adapter 只收到 immutable image reference、digest、canonical allowlisted service set、
-deployment UUID、目标 SHA、environment、action code 和 rollback 时的 expected current
-revision；它收不到 shell、GitHub mutation、approval mutation 或任意可扩展 scope。
+deployment UUID、目标 SHA、fencing token 和 rollback 的 expected current revision；它收
+不到 shell、GitHub mutation、approval mutation 或可扩展 scope。
 
-执行结果必须记录 before/after revision、observed digest 和逐服务 health。digest 不同、
-任一 health failure 或 executor failure 都进入 failed state。进程在 deploying 后中断时，
-reconciliation 先读取 authoritative consumption/state，再根据实际 observed digest 和
-health 完成 healthy/failed state；不会盲目重跑部署。
+执行结果必须记录 before/after revision、observed digest 和 canonical required health
+schema。该 schema 按 selected services 覆盖 service readiness/liveness、HTTP/dependency、
+digest、revision、migration 和 smoke；partial all-true dictionary 永不能标记成功。digest
+不同、任一 health failure 或 executor failure 都进入 failed state。进程在 deploying 后
+中断时，reconciliation 使用 runtime observer 的实际状态，不信任 caller 结果，不会盲目
+重跑部署。
 
 ## Rollback
 
@@ -152,6 +162,14 @@ rollback 必须使用独立 deployment UUID、`rollback_production` approval、�
 approval 的 request/decision 已被唯一 consumption 使用，且 action/binding 不匹配，
 不能授权 rollback。rollback 复用相同 Staging、backup、resource、lock、executor、
 health 和 append-only audit controls。
+
+rollback adapter 调用前由 runtime observer 读取实际 Production revision/digest，并与
+rollback intent expected current revision 比较；不一致时在 mutation 前 fail closed。CI
+证据来自 protected-main/CI verifier 而非 caller boolean：repository、full SHA、main
+membership、push run、Quality Gate、provenance 和 verified_at 会持久化且在 Production
+boundary 按 bounded freshness 再验证。backup/resource evidence 都 deployment-bound；前者
+含 archive/catalog/recoverability，后者含 7-sample checkpoint/recorded-completed time，过期
+即 fail closed。
 
 ## Feishu 与审计
 

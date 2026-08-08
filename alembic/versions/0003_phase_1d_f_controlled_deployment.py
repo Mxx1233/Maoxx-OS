@@ -25,6 +25,7 @@ AUDIT_TABLES = (
     "staging_acceptance_invalidations",
     "deployment_approval_bindings",
     "deployment_approval_consumptions",
+    "deployment_execution_attempts",
     "deployment_evidence",
     "deployment_rollbacks",
 )
@@ -155,6 +156,37 @@ def upgrade() -> None:
         schema="core",
     )
 
+    op.add_column(
+        "approval_requests",
+        sa.Column(
+            "deployment_id", postgresql.UUID(as_uuid=True), nullable=True
+        ),
+        schema="core",
+    )
+    op.add_column(
+        "approval_requests",
+        sa.Column("artifact_digest", sa.String(length=71), nullable=True),
+        schema="core",
+    )
+    op.create_foreign_key(
+        op.f("fk_approval_requests_deployment_id_deployment_intents"),
+        "approval_requests",
+        "deployment_intents",
+        ["deployment_id"],
+        ["id"],
+        source_schema="core",
+        referent_schema="core",
+        ondelete="RESTRICT",
+    )
+    op.create_check_constraint(
+        "deployment_binding",
+        "approval_requests",
+        "(deployment_id IS NULL AND artifact_digest IS NULL) OR "
+        "(deployment_id IS NOT NULL AND "
+        "artifact_digest ~ '^sha256:[0-9a-f]{64}$')",
+        schema="core",
+    )
+
     op.create_table(
         "deployment_artifacts",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -174,6 +206,14 @@ def upgrade() -> None:
             "quality_gate_conclusion", sa.String(length=32), nullable=False
         ),
         sa.Column("protected_main_verified", sa.Boolean(), nullable=False),
+        sa.Column("ci_workflow_name", sa.String(length=200), nullable=False),
+        sa.Column("ci_repository", sa.String(length=200), nullable=False),
+        sa.Column(
+            "ci_verified_at", sa.DateTime(timezone=True), nullable=False
+        ),
+        sa.Column(
+            "ci_provenance_source", sa.String(length=64), nullable=False
+        ),
         sa.Column("provenance", postgresql.JSONB(), nullable=False),
         sa.Column(
             "created_at",
@@ -208,6 +248,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "quality_gate_conclusion = 'success'",
             name=op.f("ck_deployment_artifacts_quality_gate"),
+        ),
+        sa.CheckConstraint(
+            "ci_provenance_source = 'github_checks_api'",
+            name=op.f("ck_deployment_artifacts_ci_provenance_source"),
         ),
         sa.ForeignKeyConstraint(
             ["deployment_id"],
@@ -397,6 +441,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
+            "requester_user_id", postgresql.UUID(as_uuid=True), nullable=False
+        ),
+        sa.Column(
             "bound_at",
             sa.DateTime(timezone=True),
             server_default=sa.text("now()"),
@@ -437,6 +484,14 @@ def upgrade() -> None:
             name=op.f(
                 "fk_deployment_approval_bindings_approval_request_id_"
                 "approval_requests"
+            ),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["requester_user_id"],
+            ["core.users.id"],
+            name=op.f(
+                "fk_deployment_approval_bindings_requester_user_id_users"
             ),
             ondelete="RESTRICT",
         ),
@@ -536,10 +591,20 @@ def upgrade() -> None:
             "deployment_id", postgresql.UUID(as_uuid=True), nullable=False
         ),
         sa.Column("owner_identity", sa.String(length=200), nullable=False),
+        sa.Column("fencing_token", sa.BigInteger(), nullable=False),
         sa.Column("acquired_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("renewed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
             "lease_expires_at", sa.DateTime(timezone=True), nullable=False
+        ),
+        sa.Column(
+            "stale_reconciled_at", sa.DateTime(timezone=True), nullable=True
+        ),
+        sa.Column("stale_reconciled_token", sa.BigInteger(), nullable=True),
+        sa.Column(
+            "stale_reconciliation_evidence_key",
+            sa.String(length=200),
+            nullable=True,
         ),
         sa.CheckConstraint(
             "environment = 'production'",
@@ -549,6 +614,14 @@ def upgrade() -> None:
             "lease_expires_at > acquired_at",
             name=op.f("ck_deployment_locks_lease"),
         ),
+        sa.CheckConstraint(
+            "conflict_domain = 'production:global'",
+            name=op.f("ck_deployment_locks_canonical_conflict_domain"),
+        ),
+        sa.CheckConstraint(
+            "fencing_token > 0",
+            name=op.f("ck_deployment_locks_fencing_token"),
+        ),
         sa.ForeignKeyConstraint(
             ["deployment_id"],
             ["core.deployment_intents.id"],
@@ -557,6 +630,48 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint(
             "conflict_domain", name=op.f("pk_deployment_locks")
+        ),
+        schema="core",
+    )
+
+    op.create_table(
+        "deployment_execution_attempts",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "deployment_id", postgresql.UUID(as_uuid=True), nullable=False
+        ),
+        sa.Column("execution_key", sa.String(length=200), nullable=False),
+        sa.Column("executor_identity", sa.String(length=200), nullable=False),
+        sa.Column("fencing_token", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "fencing_token > 0",
+            name=op.f("ck_deployment_execution_attempts_fencing_token"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["deployment_id"],
+            ["core.deployment_intents.id"],
+            name=op.f(
+                "fk_deployment_execution_attempts_deployment_id_"
+                "deployment_intents"
+            ),
+            ondelete="RESTRICT",
+        ),
+        sa.PrimaryKeyConstraint(
+            "id", name=op.f("pk_deployment_execution_attempts")
+        ),
+        sa.UniqueConstraint(
+            "deployment_id",
+            name=op.f("uq_deployment_execution_attempts_deployment_id"),
+        ),
+        sa.UniqueConstraint(
+            "execution_key",
+            name=op.f("uq_deployment_execution_attempts_execution_key"),
         ),
         schema="core",
     )
@@ -702,6 +817,7 @@ def downgrade() -> None:
         schema="core",
     )
     op.drop_table("deployment_evidence", schema="core")
+    op.drop_table("deployment_execution_attempts", schema="core")
     op.drop_table("deployment_locks", schema="core")
     op.drop_table("deployment_approval_consumptions", schema="core")
     op.drop_table("deployment_approval_bindings", schema="core")
@@ -719,6 +835,20 @@ def downgrade() -> None:
         schema="core",
     )
     op.drop_table("deployment_artifacts", schema="core")
+    op.drop_constraint(
+        op.f("ck_approval_requests_deployment_binding"),
+        "approval_requests",
+        schema="core",
+        type_="check",
+    )
+    op.drop_constraint(
+        op.f("fk_approval_requests_deployment_id_deployment_intents"),
+        "approval_requests",
+        schema="core",
+        type_="foreignkey",
+    )
+    op.drop_column("approval_requests", "artifact_digest", schema="core")
+    op.drop_column("approval_requests", "deployment_id", schema="core")
     op.drop_index(
         "ix_deployment_intents_target",
         table_name="deployment_intents",

@@ -6,6 +6,7 @@ from app.models.core import (
     DeploymentApprovalConsumption,
     DeploymentArtifact,
     DeploymentEvidence,
+    DeploymentExecutionAttempt,
     DeploymentIntent,
     DeploymentLock,
     DeploymentRollback,
@@ -33,5 +34,6 @@ __all__ = [
     "DeploymentApprovalConsumption",
     "DeploymentLock",
     "DeploymentEvidence",
+    "DeploymentExecutionAttempt",
     "DeploymentRollback",
 ]

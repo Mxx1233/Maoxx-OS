@@ -15,7 +15,7 @@ from app.services.deployment_policy import (
     validate_service_set,
 )
 from app.services.deployment_service import (
-    ExecutionResult,
+    DeploymentGateError,
     ValidatedExecution,
 )
 
@@ -149,22 +149,17 @@ class DeploymentPolicyTests(unittest.TestCase):
         with self.assertRaises(DeploymentPolicyError):
             require_transition("PRODUCTION_HEALTHY", "PRODUCTION_DEPLOYING")
 
-    def test_execution_boundary_passes_only_validated_immutable_fields(
+    def test_forged_execution_snapshot_cannot_reach_adapter(
         self,
     ) -> None:
         class Adapter:
             called = False
 
-            def deploy_immutable(self, **kwargs):
-                self.called = True
-                self.kwargs = kwargs
-                return ExecutionResult(
-                    True,
-                    DIGEST,
-                    "old",
-                    SHA,
-                    {"api": True},
-                )
+        class Verifier:
+            pass
+
+        class Observer:
+            pass
 
         adapter = Adapter()
         execution = ValidatedExecution(
@@ -180,15 +175,13 @@ class DeploymentPolicyTests(unittest.TestCase):
             lock_owner="executor-1",
             approval_consumption_id=uuid4(),
         )
-        result = ControlledExecutionBoundary(adapter).deploy(execution)
-        self.assertTrue(result.succeeded)
-        self.assertTrue(adapter.called)
-        self.assertEqual(adapter.kwargs["artifact_digest"], DIGEST)
-        self.assertEqual(adapter.kwargs["target_sha"], SHA)
-        self.assertEqual(adapter.kwargs["environment"], "production")
-        self.assertEqual(adapter.kwargs["action_code"], "production_deploy")
-        self.assertIsNone(adapter.kwargs["expected_current_revision"])
-        self.assertNotIn("repository", adapter.kwargs)
+        boundary = ControlledExecutionBoundary(adapter, Verifier(), Observer())
+        with self.assertRaises(DeploymentGateError) as rejected:
+            boundary.deploy(execution)
+        self.assertEqual(
+            rejected.exception.code, "caller_constructed_execution_forbidden"
+        )
+        self.assertFalse(adapter.called)
 
     def test_notification_is_fixed_and_contains_no_execution_claim(
         self,

@@ -7,6 +7,7 @@ from app.services.approval_service import (
     REPOSITORY_PATTERN,
     SHA_PATTERN,
 )
+from app.services.deployment_policy import DIGEST_PATTERN
 
 
 NOTIFICATION_EVENTS = frozenset(
@@ -36,6 +37,8 @@ class SupervisionNotification:
     approval_request_id: UUID | None = None
     action_code: str | None = None
     expires_at: datetime | None = None
+    deployment_id: UUID | None = None
+    artifact_digest: str | None = None
 
     def validate(self) -> None:
         if self.event_type not in NOTIFICATION_EVENTS:
@@ -84,6 +87,15 @@ class SupervisionNotification:
                 raise NotificationValidationError(
                     "approval event requires persisted request fields"
                 )
+            if (self.deployment_id is None) != (self.artifact_digest is None):
+                raise NotificationValidationError(
+                    "deployment approval binding fields must be paired"
+                )
+            if (
+                self.artifact_digest is not None
+                and not DIGEST_PATTERN.fullmatch(self.artifact_digest)
+            ):
+                raise NotificationValidationError("invalid artifact_digest")
             expected_environment = {
                 "development_plan": "development",
                 "merge_pr": "staging",
@@ -107,6 +119,8 @@ class SupervisionNotification:
                 self.approval_request_id,
                 self.action_code,
                 self.expires_at,
+                self.deployment_id,
+                self.artifact_digest,
             )
         ):
             raise NotificationValidationError(
@@ -126,6 +140,8 @@ def notification_from_fields(
         "approval_request_id",
         "action_code",
         "expires_at",
+        "deployment_id",
+        "artifact_digest",
     }
     unknown = set(fields) - allowed_fields
     if unknown:
@@ -169,4 +185,12 @@ def format_notification(notification: SupervisionNotification) -> str:
                 "此审批只记录决定，不会执行受保护动作。",
             ]
         )
+        if notification.deployment_id is not None:
+            assert notification.artifact_digest is not None
+            lines.extend(
+                [
+                    f"部署：{notification.deployment_id}",
+                    f"工件摘要：{notification.artifact_digest[:19]}…",
+                ]
+            )
     return "\n".join(lines)

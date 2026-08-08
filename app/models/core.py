@@ -234,6 +234,12 @@ class ApprovalRequest(Base):
             "target_environment = 'production')",
             name="action_target",
         ),
+        CheckConstraint(
+            "(deployment_id IS NULL AND artifact_digest IS NULL) OR "
+            "(deployment_id IS NOT NULL AND "
+            "artifact_digest ~ '^sha256:[0-9a-f]{64}$')",
+            name="deployment_binding",
+        ),
         UniqueConstraint(
             "idempotency_key",
             name="uq_approval_requests_idempotency_key",
@@ -272,6 +278,15 @@ class ApprovalRequest(Base):
     target_environment: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
+    )
+    deployment_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    artifact_digest: Mapped[str | None] = mapped_column(
+        String(71),
+        nullable=True,
     )
     idempotency_key: Mapped[str] = mapped_column(
         String(200),
@@ -476,6 +491,10 @@ class DeploymentArtifact(Base):
             "quality_gate_conclusion = 'success'",
             name="quality_gate",
         ),
+        CheckConstraint(
+            "ci_provenance_source = 'github_checks_api'",
+            name="ci_provenance_source",
+        ),
         UniqueConstraint(
             "deployment_id",
             name="uq_deployment_artifacts_deployment_id",
@@ -510,6 +529,14 @@ class DeploymentArtifact(Base):
     protected_main_verified: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
+    )
+    ci_workflow_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    ci_repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    ci_verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ci_provenance_source: Mapped[str] = mapped_column(
+        String(64), nullable=False
     )
     provenance: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -695,6 +722,11 @@ class DeploymentApprovalBinding(Base):
     requester_identity_fingerprint: Mapped[str] = mapped_column(
         String(64), nullable=False
     )
+    requester_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     bound_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -757,6 +789,11 @@ class DeploymentLock(Base):
             "lease_expires_at > acquired_at",
             name="lease",
         ),
+        CheckConstraint(
+            "conflict_domain = 'production:global'",
+            name="canonical_conflict_domain",
+        ),
+        CheckConstraint("fencing_token > 0", name="fencing_token"),
         {"schema": "core"},
     )
 
@@ -768,6 +805,7 @@ class DeploymentLock(Base):
         nullable=False,
     )
     owner_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
     acquired_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -776,6 +814,46 @@ class DeploymentLock(Base):
     )
     lease_expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+    stale_reconciled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stale_reconciled_token: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    stale_reconciliation_evidence_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+
+
+class DeploymentExecutionAttempt(Base):
+    __tablename__ = "deployment_execution_attempts"
+    __table_args__ = (
+        CheckConstraint("fencing_token > 0", name="fencing_token"),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_execution_attempts_deployment_id",
+        ),
+        UniqueConstraint(
+            "execution_key",
+            name="uq_deployment_execution_attempts_execution_key",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    execution_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    executor_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

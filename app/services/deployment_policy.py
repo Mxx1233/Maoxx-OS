@@ -12,6 +12,23 @@ IMMUTABLE_IMAGE_PATTERN = re.compile(
 APPROVED_PRODUCTION_SERVICES = frozenset({"api", "feishu-worker"})
 
 
+def required_health_checks(services: tuple[str, ...]) -> frozenset[str]:
+    """Canonical health schema; arbitrary truthy dictionaries are insufficient."""
+    required = {"artifact_digest", "revision_sha", "migration", "smoke"}
+    if "api" in services:
+        required.update({"api.ready", "api.http", "api.dependency.db"})
+    if "feishu-worker" in services:
+        required.update({"feishu-worker.ready", "feishu-worker.connected"})
+    return frozenset(required)
+
+
+def health_checks_are_complete(
+    services: tuple[str, ...], health_checks: dict[str, bool]
+) -> bool:
+    required = required_health_checks(services)
+    return set(health_checks) == required and all(health_checks.values())
+
+
 class DeploymentPolicyError(ValueError):
     pass
 

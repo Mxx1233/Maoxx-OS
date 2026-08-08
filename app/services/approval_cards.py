@@ -60,6 +60,14 @@ def _approval_details(notification: SupervisionNotification) -> str:
             f"**请求：** {notification.approval_request_id}",
         ]
     )
+    if notification.deployment_id is not None:
+        assert notification.artifact_digest is not None
+        lines.extend(
+            [
+                f"**部署：** {notification.deployment_id}",
+                f"**工件摘要：** {notification.artifact_digest[:19]}…",
+            ]
+        )
     return "\n".join(lines)
 
 
