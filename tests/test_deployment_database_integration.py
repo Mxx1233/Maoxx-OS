@@ -12,7 +12,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
-from app.models import User
+from app.models import ExternalIdentity, User
+from app.services.deployment_authority import external_identity_fingerprint
 from app.services.approval_service import (
     ApprovalCommand,
     create_approval_request,
@@ -25,7 +26,11 @@ from app.services.deployment_authority import (
     VerifiedCiEvidence,
 )
 from app.services.deployment_executor import ControlledExecutionBoundary
-from app.services.deployment_policy import MigrationRisk, ResourceSample
+from app.services.deployment_policy import (
+    MigrationRisk,
+    ResourceSample,
+    required_health_checks,
+)
 from app.services.deployment_service import (
     DeploymentGateError,
     acquire_deployment_lock,
@@ -88,6 +93,25 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
                 [
                     User(id=cls.requester_id, display_name="Requester"),
                     User(id=cls.approver_id, display_name="Approver"),
+                ]
+            )
+            db.flush()
+            db.add_all(
+                [
+                    ExternalIdentity(
+                        provider="feishu",
+                        subject_fingerprint=external_identity_fingerprint(
+                            "requester"
+                        ),
+                        user_id=cls.requester_id,
+                    ),
+                    ExternalIdentity(
+                        provider="feishu",
+                        subject_fingerprint=external_identity_fingerprint(
+                            "approver"
+                        ),
+                        user_id=cls.approver_id,
+                    ),
                 ]
             )
             db.commit()
@@ -188,36 +212,15 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
             self.calls: list[UUID] = []
             self.accept_fence = True
 
-        def verify_fencing_token(self, **kwargs) -> bool:
-            return self.accept_fence
-
-        def deploy_immutable(self, **kwargs) -> None:
+        def mutate_atomically(self, **kwargs) -> None:
+            if not self.accept_fence:
+                raise DeploymentGateError("executor_fencing_rejected")
             execution_id = kwargs["execution_id"]
             if execution_id in self.calls:
                 raise AssertionError("duplicate mutation")
             self.calls.append(execution_id)
             services = kwargs["services"]
-            health = {
-                "artifact_digest": True,
-                "revision_sha": True,
-                "migration": True,
-                "smoke": True,
-            }
-            if "api" in services:
-                health.update(
-                    {
-                        "api.ready": True,
-                        "api.http": True,
-                        "api.dependency.db": True,
-                    }
-                )
-            if "feishu-worker" in services:
-                health.update(
-                    {
-                        "feishu-worker.ready": True,
-                        "feishu-worker.connected": True,
-                    }
-                )
+            health = {key: True for key in required_health_checks(services)}
             self.observer.set(
                 deployment_id=kwargs["deployment_id"],
                 execution_id=execution_id,
@@ -232,7 +235,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
         with self.sessions() as db:
             return create_deployment_intent(
                 db,
-                user_id=self.requester_id,
+                authenticated_feishu_open_id="requester",
                 intent_kind=kind,
                 repository="Mxx1233/Maoxx-OS",
                 target_sha=self._sha(char),
@@ -319,6 +322,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
                     "restore_verification_ref": "restore-test",
                     "created_at": created,
                     "persistent_state_scope": "postgresql-core",
+                    "verifier": "filesystem_pg_restore_v1",
                 },
             )
         with self.sessions() as db:
@@ -647,7 +651,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
         )
 
         class PartialHealthAdapter(self.Adapter):
-            def deploy_immutable(self, **kwargs) -> None:
+            def mutate_atomically(self, **kwargs) -> None:
                 self.calls.append(kwargs["execution_id"])
                 self.observer.set(
                     deployment_id=kwargs["deployment_id"],
@@ -683,7 +687,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
         )
 
         class FailingAdapter(self.Adapter):
-            def deploy_immutable(self, **kwargs) -> None:
+            def mutate_atomically(self, **kwargs) -> None:
                 self.calls.append(kwargs["execution_id"])
                 self.observer.set(
                     deployment_id=kwargs["deployment_id"],

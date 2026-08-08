@@ -138,6 +138,14 @@ authoritative runtime observer 必须先证明旧 actor 不在执行中，记录
 reconciliation evidence/时间，再可写入 new owner/new token。旧 token 会被拒绝，两个
 executor（包括 lease expiry 后）不能同时修改 Production。
 
+Production wiring is concrete rather than caller-injected: authenticated `gh api` verifies
+the protected-main push/Quality Gate, the fixed compose runtime is observed read-only, and the
+restricted adapter holds the canonical DB lock while it validates the current fence and invokes
+only `docker compose ... up -d --no-deps` for the canonical allowlisted service set. The card
+displays the full immutable `sha256:` digest. Feishu identities are resolved through a one-to-one,
+privacy-safe `core.external_identities` mapping; a deployment requester is resolved from that
+authenticated external identity, not a caller-supplied user UUID.
+
 ## 专用执行边界和 reconciliation
 
 `ControlledExecutionBoundary` 没有 caller-constructible authorization API。每次 adapter

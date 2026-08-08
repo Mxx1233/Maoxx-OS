@@ -32,6 +32,37 @@ AUDIT_TABLES = (
 
 
 def upgrade() -> None:
+    op.create_table(
+        "external_identities",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("provider", sa.String(length=32), nullable=False),
+        sa.Column("subject_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), nullable=False
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "provider = 'feishu'", name=op.f("ck_external_identities_provider")
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"], ["core.users.id"], ondelete="RESTRICT"
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_external_identities")),
+        sa.UniqueConstraint(
+            "provider",
+            "subject_fingerprint",
+            name=op.f("uq_external_identities_provider_subject"),
+        ),
+        sa.UniqueConstraint(
+            "provider", "user_id", name=op.f("uq_external_identities_provider_user")
+        ),
+        schema="core",
+    )
     op.drop_constraint(
         op.f("ck_approval_requests_action_code"),
         "approval_requests",
@@ -835,6 +866,7 @@ def downgrade() -> None:
         schema="core",
     )
     op.drop_table("deployment_artifacts", schema="core")
+    op.drop_table("external_identities", schema="core")
     op.drop_constraint(
         op.f("ck_approval_requests_deployment_binding"),
         "approval_requests",

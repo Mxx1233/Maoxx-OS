@@ -19,6 +19,10 @@ UPDATE/DELETE。lease 固定为 server-derived `production:global` domain，并�
 token；过期 owner 必须由 authoritative runtime reconciliation 安全确认后才可接管。一次性
 consumption 与进入 deploying state/唯一 execution identity 在同一事务建立。
 
+0003 还增加 `core.external_identities`：仅保存 Feishu subject 的不可逆 fingerprint，并以
+provider+subject、provider+user 双唯一约束保证一个 authenticated Feishu identity 精确映射
+到一个 canonical `core.users` principal；缺失或歧义映射 fail closed。
+
 ## 阶段 2 设计范围
 
 ### 阶段 2A：媒体与原始输入

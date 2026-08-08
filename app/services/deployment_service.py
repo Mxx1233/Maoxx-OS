@@ -21,7 +21,6 @@ from app.models import (
     DeploymentStateEvent,
     StagingAcceptance,
     StagingAcceptanceInvalidation,
-    User,
 )
 from app.services.approval_service import (
     IDEMPOTENCY_KEY_PATTERN,
@@ -49,6 +48,7 @@ from app.services.deployment_authority import (
     AuthoritativeRuntimeObserver,
     CanonicalExecutorIdentity,
     CanonicalHumanIdentity,
+    DatabaseCanonicalIdentityResolver,
     ProtectedMainCiVerifier,
     RuntimeState,
     VerifiedCiEvidence,
@@ -149,10 +149,12 @@ def _database_now(db: Session):
 def _resolve_human_identity(
     db: Session, user_id: UUID
 ) -> CanonicalHumanIdentity:
-    """Resolve only a persisted human principal; caller hashes are ignored."""
-    if db.get(User, user_id) is None:
-        raise DeploymentGateError("unknown_or_ambiguous_human_identity")
-    return CanonicalHumanIdentity(user_id)
+    try:
+        return DatabaseCanonicalIdentityResolver(db).resolve_human(user_id)
+    except ValueError as exc:
+        raise DeploymentGateError(
+            "unknown_or_ambiguous_human_identity"
+        ) from exc
 
 
 def _resolve_executor_identity(service_id: str) -> CanonicalExecutorIdentity:
@@ -270,7 +272,7 @@ def _validate_intent_fields(
 def create_deployment_intent(
     db: Session,
     *,
-    user_id: UUID,
+    authenticated_feishu_open_id: str,
     intent_kind: str,
     repository: str,
     target_sha: str,
@@ -282,7 +284,15 @@ def create_deployment_intent(
     config_fingerprint: str,
     idempotency_key: str,
 ) -> DeploymentIntent:
-    requester = _resolve_human_identity(db, user_id)
+    try:
+        requester = DatabaseCanonicalIdentityResolver(
+            db
+        ).resolve_feishu_open_id(authenticated_feishu_open_id)
+    except ValueError as exc:
+        raise DeploymentGateError(
+            "unknown_or_ambiguous_requester_identity"
+        ) from exc
+    user_id = requester.user_id
     action_code = {
         "deploy": "production_deploy",
         "rollback": "rollback_production",
@@ -837,6 +847,8 @@ def record_deployment_evidence(
 ) -> DeploymentEvidence:
     if db.get(DeploymentIntent, deployment_id) is None:
         raise DeploymentGateError("unknown_deployment")
+    if evidence_type == "resource_gate":
+        raise DeploymentGateError("resource_evidence_must_be_evaluated")
     if evidence_type == "predeploy_backup" and status_code == "passed":
         required = {
             "deployment_id",
@@ -847,6 +859,7 @@ def record_deployment_evidence(
             "restore_verification_ref",
             "created_at",
             "persistent_state_scope",
+            "verifier",
         }
         if (
             set(payload) != required
@@ -859,6 +872,7 @@ def record_deployment_evidence(
             or not isinstance(payload["persistent_state_scope"], str)
             or not payload["persistent_state_scope"]
             or payload["deployment_id"] != str(deployment_id)
+            or payload["verifier"] != "filesystem_pg_restore_v1"
         ):
             raise DeploymentGateError("invalid_backup_evidence")
         if not re.fullmatch(r"[0-9a-f]{64}", str(payload["sha256"])):
@@ -940,14 +954,18 @@ def record_resource_gate(
             for sample in samples
         ],
     }
-    return record_deployment_evidence(
+    evidence = _add_evidence(
         db,
         deployment_id=deployment_id,
         evidence_type="resource_gate",
         evidence_key=evidence_key,
         status_code="passed" if result.passed else "failed",
         payload=payload,
+        occurred_at=completed_at,
     )
+    db.commit()
+    db.refresh(evidence)
+    return evidence
 
 
 def acquire_deployment_lock(
@@ -1217,6 +1235,23 @@ def _require_fresh_evidence(
             < now
         ):
             raise DeploymentGateError("stale_predeploy_backup")
+    if evidence_type == "resource_gate":
+        try:
+            completed_at = datetime.fromisoformat(
+                evidence.payload["completed_at"]
+            )
+        except (KeyError, TypeError, ValueError):
+            raise DeploymentGateError(
+                "invalid_resource_gate_timestamp"
+            ) from None
+        if (
+            completed_at.tzinfo is None
+            or completed_at
+            + timedelta(seconds=RESOURCE_EVIDENCE_MAX_AGE_SECONDS)
+            < now
+            or evidence.occurred_at != completed_at
+        ):
+            raise DeploymentGateError("stale_resource_gate")
     return evidence
 
 
@@ -1643,13 +1678,33 @@ def reconcile_authoritative_execution(
     if observation.state in {
         RuntimeState.NOT_STARTED,
         RuntimeState.IN_PROGRESS,
+        RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN,
         RuntimeState.UNKNOWN,
     }:
+        _add_evidence(
+            db,
+            deployment_id=deployment_id,
+            evidence_type="interruption_reconciliation",
+            evidence_key=evidence_key,
+            status_code="pending"
+            if observation.state != RuntimeState.UNKNOWN
+            else "failed",
+            payload={
+                "execution_id": str(execution_id),
+                "runtime_state": observation.state.value,
+                "observed_at": observation.observed_at.isoformat(),
+            },
+        )
+        db.commit()
         return observation.state.value
     succeeded = (
         observation.state == RuntimeState.HEALTHY
         and observation.observed_digest == execution.artifact_digest
         and observation.observed_revision == intent.target_sha
+        and (
+            intent.migration_revision is None
+            or observation.migration_revision == intent.migration_revision
+        )
         and health_checks_are_complete(
             execution.services, observation.health_checks
         )

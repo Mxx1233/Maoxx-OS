@@ -65,7 +65,7 @@ def _approval_details(notification: SupervisionNotification) -> str:
         lines.extend(
             [
                 f"**部署：** {notification.deployment_id}",
-                f"**工件摘要：** {notification.artifact_digest[:19]}…",
+                f"**工件摘要（完整）：** {notification.artifact_digest}",
             ]
         )
     return "\n".join(lines)

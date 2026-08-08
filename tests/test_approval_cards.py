@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -52,6 +53,17 @@ class ApprovalCardTests(unittest.TestCase):
         self.assertIn("Mxx1233/Maoxx-OS", serialized)
         self.assertNotIn("shell", serialized.lower())
         self.assertNotIn("secret", serialized.lower())
+
+    def test_deployment_card_displays_exact_immutable_digest(self) -> None:
+        digest = "sha256:" + "b" * 64
+        card = build_approval_card(
+            replace(
+                notification(),
+                deployment_id=UUID("22222222-2222-4222-8222-222222222222"),
+                artifact_digest=digest,
+            )
+        )
+        self.assertIn(digest, str(card))
 
     def test_final_and_waiting_card_states_are_unambiguous(self) -> None:
         approved = build_approval_card(notification(), state="approved")

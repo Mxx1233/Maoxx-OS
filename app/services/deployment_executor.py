@@ -11,10 +11,14 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.services.deployment_authority import (
+    AtomicDockerProductionAdapter,
     AuthoritativeRuntimeObserver,
+    DockerProductionRuntimeObserver,
     FencingAwareExecutionAdapter,
+    GitHubCliProtectedMainCiVerifier,
     ProtectedMainCiVerifier,
 )
+from pathlib import Path
 from app.services.deployment_service import (
     DeploymentGateError,
     prepare_authoritative_mutation,
@@ -48,13 +52,7 @@ class ControlledExecutionBoundary:
             ci_verifier=self.ci_verifier,
             runtime_observer=self.runtime_observer,
         )
-        if not self.adapter.verify_fencing_token(
-            deployment_id=execution.deployment_id,
-            execution_id=execution.execution_id,
-            fencing_token=execution.fencing_token,
-        ):
-            raise DeploymentGateError("executor_fencing_rejected")
-        self.adapter.deploy_immutable(
+        self.adapter.mutate_atomically(
             deployment_id=execution.deployment_id,
             execution_id=execution.execution_id,
             fencing_token=execution.fencing_token,
@@ -79,3 +77,19 @@ class ControlledExecutionBoundary:
         """Reject the former caller-constructed execution API."""
         del args, kwargs
         raise DeploymentGateError("caller_constructed_execution_forbidden")
+
+
+def production_execution_boundary(
+    session_factory,
+) -> ControlledExecutionBoundary:
+    """Only Production wiring: concrete authenticated/read-only authorities."""
+    compose_file = Path("/opt/maoxx-os/docker-compose.yml")
+    return ControlledExecutionBoundary(
+        adapter=AtomicDockerProductionAdapter(
+            session_factory=session_factory, compose_file=compose_file
+        ),
+        ci_verifier=GitHubCliProtectedMainCiVerifier(),
+        runtime_observer=DockerProductionRuntimeObserver(
+            compose_file=compose_file
+        ),
+    )

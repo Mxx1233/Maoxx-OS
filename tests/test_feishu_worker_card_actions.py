@@ -122,7 +122,7 @@ class FeishuWorkerCardActionTests(unittest.TestCase):
             ),
         ):
             response = self.worker.handle_card_action(MagicMock())
-        db.get.assert_called_once_with(self.worker.ApprovalRequest, REQUEST_ID)
+        self.assertEqual(db.get.call_count, 2)
         response_json = json.loads(self.worker.lark.JSON.marshal(response))
         serialized = json.dumps(response_json, ensure_ascii=False)
         self.assertIn("Authoritative/Repository", serialized)

@@ -30,6 +30,7 @@ from app.services.approval_cards import (
     build_card_callback_response,
     parse_approval_card_action,
 )
+from app.services.deployment_authority import DatabaseCanonicalIdentityResolver
 from app.services.feishu_delivery import deliver_with_retry
 from app.services.feishu_replies import recorded_reply
 from app.services.supervision_notifications import SupervisionNotification
@@ -309,6 +310,15 @@ def handle_card_action(
             outcome = ApprovalOutcome("malformed")
         else:
             with SessionLocal() as db:
+                request = db.get(ApprovalRequest, parsed.request_id)
+                actor_user_id = settings.default_user_id
+                if (
+                    isinstance(request, ApprovalRequest)
+                    and request.deployment_id is not None
+                ):
+                    actor_user_id = DatabaseCanonicalIdentityResolver(
+                        db
+                    ).resolve_feishu_open_id(operator_open_id or "").user_id
                 outcome = process_approval_card_action(
                     db,
                     action=parsed.action,
@@ -318,7 +328,7 @@ def handle_card_action(
                     operator_open_id=operator_open_id,
                     chat_id=context.get("open_chat_id"),
                     feishu_event_id=event_id or "",
-                    actor_user_id=settings.default_user_id,
+                    actor_user_id=actor_user_id,
                     allowed_tenant_keys=settings.allowed_tenant_keys,
                     allowed_open_ids=settings.allowed_open_ids,
                     approver_open_ids=settings.approver_open_ids,

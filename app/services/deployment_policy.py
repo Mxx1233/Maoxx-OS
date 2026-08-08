@@ -14,11 +14,33 @@ APPROVED_PRODUCTION_SERVICES = frozenset({"api", "feishu-worker"})
 
 def required_health_checks(services: tuple[str, ...]) -> frozenset[str]:
     """Canonical health schema; arbitrary truthy dictionaries are insufficient."""
-    required = {"artifact_digest", "revision_sha", "migration", "smoke"}
+    required = {
+        "artifact_digest",
+        "revision_sha",
+        "migration",
+        "smoke",
+        "critical_regression",
+        "verification_within_timeout",
+    }
     if "api" in services:
-        required.update({"api.ready", "api.http", "api.dependency.db"})
+        required.update(
+            {
+                "api.alive",
+                "api.ready",
+                "api.live",
+                "api.http",
+                "api.dependency.db",
+            }
+        )
     if "feishu-worker" in services:
-        required.update({"feishu-worker.ready", "feishu-worker.connected"})
+        required.update(
+            {
+                "feishu-worker.alive",
+                "feishu-worker.ready",
+                "feishu-worker.live",
+                "feishu-worker.connected",
+            }
+        )
     return frozenset(required)
 
 
