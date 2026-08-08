@@ -282,6 +282,86 @@ def record_approval_decision(
         return ApprovalOutcome("unavailable")
 
 
+def inspect_pending_approval_request(
+    db: Session,
+    *,
+    request_id: UUID,
+) -> ApprovalOutcome:
+    """Validate a non-final wait action without consuming the request."""
+
+    try:
+        request = db.execute(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id == request_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if request is None:
+            db.rollback()
+            return ApprovalOutcome("unknown_request")
+
+        database_now = db.execute(select(func.clock_timestamp())).scalar_one()
+        if database_now >= request.expires_at:
+            db.rollback()
+            return ApprovalOutcome("expired")
+
+        existing_decision = db.execute(
+            select(ApprovalDecision).where(
+                ApprovalDecision.request_id == request_id
+            )
+        ).scalar_one_or_none()
+        db.rollback()
+        if existing_decision is not None:
+            return ApprovalOutcome("already_decided")
+        return ApprovalOutcome("waiting")
+    except SQLAlchemyError:
+        db.rollback()
+        return ApprovalOutcome("unavailable")
+
+
+def process_approval_card_action(
+    db: Session,
+    *,
+    action: str,
+    request_id: UUID,
+    tenant_key: str | None,
+    operator_open_id: str | None,
+    chat_id: str | None,
+    feishu_event_id: str,
+    actor_user_id: UUID,
+    allowed_tenant_keys: frozenset[str],
+    allowed_open_ids: frozenset[str],
+    approver_open_ids: frozenset[str],
+    supervision_chat_id: str,
+) -> ApprovalOutcome:
+    if action not in {"approve", "reject", "wait"}:
+        return ApprovalOutcome("malformed")
+    if not feishu_event_id or len(feishu_event_id) > 200:
+        return ApprovalOutcome("invalid_event")
+    if (
+        not tenant_key
+        or tenant_key not in allowed_tenant_keys
+        or not operator_open_id
+        or operator_open_id not in allowed_open_ids
+        or operator_open_id not in approver_open_ids
+        or not supervision_chat_id
+        or chat_id != supervision_chat_id
+    ):
+        return ApprovalOutcome("unauthorized")
+
+    if action == "wait":
+        return inspect_pending_approval_request(db, request_id=request_id)
+    return record_approval_decision(
+        db,
+        command=ApprovalCommand(
+            "approved" if action == "approve" else "rejected",
+            request_id,
+        ),
+        feishu_event_id=feishu_event_id,
+        actor_user_id=actor_user_id,
+        actor_open_id=operator_open_id,
+    )
+
+
 def process_approval_message(
     db: Session,
     *,

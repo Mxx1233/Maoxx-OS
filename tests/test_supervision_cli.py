@@ -9,10 +9,12 @@ from uuid import UUID
 from app.supervision_cli import (
     GitHubEvidence,
     GitHubVerificationError,
+    _send,
     _run_gh_paginated_check_runs,
     run,
     verify_github_state,
 )
+from app.services.supervision_notifications import SupervisionNotification
 
 
 SHA = "a" * 40
@@ -294,6 +296,44 @@ class SupervisionCliTests(unittest.TestCase):
         ):
             self.assertEqual(run(args), 0)
         self.assertEqual(events, ["persisted", "sent"])
+
+    def test_approval_notification_uses_interactive_card_as_primary(
+        self,
+    ) -> None:
+        approval = SupervisionNotification(
+            event_type="approval_required",
+            repository="Mxx1233/Maoxx-OS",
+            target_sha=SHA,
+            pull_request_number=14,
+            target_environment="production",
+            approval_request_id=UUID("11111111-1111-4111-8111-111111111111"),
+            action_code="production_deploy",
+            expires_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
+        )
+        with (
+            patch("app.supervision_cli.build_feishu_client"),
+            patch("app.supervision_cli.send_interactive_card") as send_card,
+            patch("app.supervision_cli.send_structured_text") as send_text,
+            patch(
+                "app.supervision_cli.settings",
+                SimpleNamespace(
+                    approval_configuration_valid=True,
+                    feishu_app_id="fake-app-id",
+                    feishu_app_secret="fake-app-secret",
+                    feishu_supervision_chat_id="fake-chat-id",
+                    feishu_reply_max_attempts=1,
+                    feishu_reply_backoff_seconds=0,
+                ),
+            ),
+        ):
+            send_card.return_value = SimpleNamespace(sent=True)
+            self.assertTrue(_send(approval))
+        send_card.assert_called_once()
+        send_text.assert_not_called()
+        self.assertEqual(
+            send_card.call_args.kwargs["card"]["elements"][-1]["tag"],
+            "action",
+        )
 
 
 if __name__ == "__main__":

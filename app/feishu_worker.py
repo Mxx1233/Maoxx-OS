@@ -7,21 +7,32 @@ from lark_oapi.api.im.v1 import (
     ReplyMessageRequest,
     ReplyMessageRequestBody,
 )
+from lark_oapi.event.callback.model.p2_card_action_trigger import (
+    P2CardActionTrigger,
+    P2CardActionTriggerResponse,
+)
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import RawInput
+from app.models import ApprovalRequest, RawInput
 from app.services.feishu_authorization import (
     authorize_feishu_message,
     identifier_fingerprint,
 )
 from app.services.approval_service import (
+    ApprovalOutcome,
     approval_outcome_reply,
+    process_approval_card_action,
     process_approval_message,
+)
+from app.services.approval_cards import (
+    build_card_callback_response,
+    parse_approval_card_action,
 )
 from app.services.feishu_delivery import deliver_with_retry
 from app.services.feishu_replies import recorded_reply
+from app.services.supervision_notifications import SupervisionNotification
 from app.services.worker_health import (
     WORKER_HEALTH_HOST,
     WORKER_HEALTH_PORT,
@@ -257,9 +268,116 @@ def handle_message(data: P2ImMessageReceiveV1) -> None:
             worker_health.mark_event_succeeded()
 
 
+def _approval_notification_from_request(
+    request: ApprovalRequest,
+) -> SupervisionNotification:
+    return SupervisionNotification(
+        event_type="approval_required",
+        repository=request.repository,
+        target_sha=request.target_sha,
+        pull_request_number=request.pull_request_number,
+        target_environment=request.target_environment,
+        approval_request_id=request.id,
+        action_code=request.action_code,
+        expires_at=request.expires_at,
+    )
+
+
+def handle_card_action(
+    data: P2CardActionTrigger,
+) -> P2CardActionTriggerResponse:
+    """Handle a signed Feishu card callback outside message parsing."""
+
+    worker_health.mark_event_received()
+    failed = False
+    event_id: str | None = None
+    operator_open_id: str | None = None
+    parsed = None
+    outcome = ApprovalOutcome("unavailable")
+    notification: SupervisionNotification | None = None
+    try:
+        payload = json.loads(lark.JSON.marshal(data))
+        header = payload.get("header") or {}
+        event = payload.get("event") or {}
+        operator = event.get("operator") or {}
+        context = event.get("context") or {}
+        callback_action = event.get("action") or {}
+        event_id = header.get("event_id")
+        operator_open_id = operator.get("open_id")
+        parsed = parse_approval_card_action(callback_action.get("value"))
+        if parsed is None:
+            outcome = ApprovalOutcome("malformed")
+        else:
+            with SessionLocal() as db:
+                outcome = process_approval_card_action(
+                    db,
+                    action=parsed.action,
+                    request_id=parsed.request_id,
+                    tenant_key=header.get("tenant_key")
+                    or operator.get("tenant_key"),
+                    operator_open_id=operator_open_id,
+                    chat_id=context.get("open_chat_id"),
+                    feishu_event_id=event_id or "",
+                    actor_user_id=settings.default_user_id,
+                    allowed_tenant_keys=settings.allowed_tenant_keys,
+                    allowed_open_ids=settings.allowed_open_ids,
+                    approver_open_ids=settings.approver_open_ids,
+                    supervision_chat_id=(
+                        settings.feishu_supervision_chat_id.strip()
+                    ),
+                )
+                if outcome.code in {"recorded", "duplicate", "waiting"}:
+                    request = db.get(ApprovalRequest, parsed.request_id)
+                    if request is not None:
+                        notification = _approval_notification_from_request(
+                            request
+                        )
+        logger.info(
+            "event=feishu_card_approval_result result=%s action=%s "
+            "request=%s actor=%s callback=%s",
+            outcome.code,
+            parsed.action if parsed is not None else "invalid",
+            identifier_fingerprint(
+                str(parsed.request_id) if parsed is not None else None
+            ),
+            identifier_fingerprint(operator_open_id),
+            identifier_fingerprint(event_id),
+        )
+        return P2CardActionTriggerResponse(
+            build_card_callback_response(outcome, notification)
+        )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        failed = True
+        logger.error(
+            "event=feishu_card_approval_failed reason=invalid_callback"
+        )
+        return P2CardActionTriggerResponse(
+            build_card_callback_response(ApprovalOutcome("malformed"), None)
+        )
+    except Exception as exc:
+        failed = True
+        logger.error(
+            "event=feishu_card_approval_failed reason=unhandled_error "
+            "exception_type=%s",
+            type(exc).__name__,
+        )
+        return P2CardActionTriggerResponse(
+            build_card_callback_response(
+                ApprovalOutcome("unavailable"),
+                None,
+            )
+        )
+    finally:
+        if failed:
+            worker_health.mark_event_failed()
+        else:
+            worker_health.mark_event_succeeded()
+
+
 event_handler = (
     lark.EventDispatcherHandler.builder("", "")
     .register_p2_im_message_receive_v1(handle_message)
+    .register_p2_card_action_trigger(handle_card_action)
     .build()
 )
 

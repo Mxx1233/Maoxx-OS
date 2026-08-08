@@ -1,7 +1,11 @@
+import json
 import unittest
 from dataclasses import dataclass
 
-from app.services.feishu_messaging import send_structured_text
+from app.services.feishu_messaging import (
+    send_interactive_card,
+    send_structured_text,
+)
 
 
 @dataclass
@@ -108,6 +112,23 @@ class FeishuMessagingTests(unittest.TestCase):
                 max_attempts=1,
                 backoff_seconds=0,
             )
+
+    def test_sends_interactive_card_payload(self) -> None:
+        client = FakeClient([FakeResponse(True)])
+        result = send_interactive_card(
+            client,
+            chat_id="fake-chat-id",
+            card={"elements": []},
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+        self.assertTrue(result.sent)
+        request = client.message.requests[0]
+        self.assertEqual(request.request_body.msg_type, "interactive")
+        self.assertEqual(
+            json.loads(request.request_body.content),
+            {"elements": []},
+        )
 
 
 if __name__ == "__main__":
