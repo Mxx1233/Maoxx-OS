@@ -13,8 +13,10 @@ from app.services.approval_service import (
 )
 from app.services.feishu_messaging import (
     build_feishu_client,
+    send_interactive_card,
     send_structured_text,
 )
+from app.services.approval_cards import build_approval_card
 from app.services.supervision_notifications import (
     NotificationValidationError,
     SupervisionNotification,
@@ -169,13 +171,23 @@ def _send(notification: SupervisionNotification) -> bool:
         settings.feishu_app_id,
         settings.feishu_app_secret,
     )
-    result = send_structured_text(
-        client,
-        chat_id=settings.feishu_supervision_chat_id.strip(),
-        text=format_notification(notification),
-        max_attempts=settings.feishu_reply_max_attempts,
-        backoff_seconds=settings.feishu_reply_backoff_seconds,
-    )
+    common = {
+        "chat_id": settings.feishu_supervision_chat_id.strip(),
+        "max_attempts": settings.feishu_reply_max_attempts,
+        "backoff_seconds": settings.feishu_reply_backoff_seconds,
+    }
+    if notification.event_type == "approval_required":
+        result = send_interactive_card(
+            client,
+            card=build_approval_card(notification),
+            **common,
+        )
+    else:
+        result = send_structured_text(
+            client,
+            text=format_notification(notification),
+            **common,
+        )
     return result.sent
 
 

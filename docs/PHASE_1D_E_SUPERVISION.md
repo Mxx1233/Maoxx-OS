@@ -1,4 +1,4 @@
-# Phase 1D-E Feishu Supervision and Manual Approval
+# Phase 1D-E Feishu Supervision and Interactive Approval
 
 Phase 1D-E 当前为 `implemented_pending_verification`。Phase 1D-D 已通过真实
 Staging 运行验收并标记为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A
@@ -32,11 +32,12 @@ Staging Worker、GitHub webhook、poller 或自动 PR/CI 监控。GitHub PR、re
 缺失 chat、空审批人 allowlist 或越界 TTL 均 fail closed。App Secret、Token、
 完整身份标识和 `DATABASE_URL` 不得进入 Git、日志、PR、测试或审批表。
 
-Production 飞书应用的主动发消息权限尚未验证。本 PR 不读取 Production 凭据、
-不发送真实消息；主动消息能力只能在合并、Production post-merge 检查、备份和
-migration 独立批准后验证。
+Production 数据库已经位于 `0002_phase_1d_e_approvals`，此前文字 fallback Worker
+也已完成独立 rollout。本 remediation PR 不读取 Production 凭据、不发送真实
+消息，也不修改 Production 或 Accepted Staging；新卡片路径仍须在合并后单独批准
+Worker rollout 和真实飞书验收。
 
-## 固定通知
+## 固定通知与审批卡片
 
 CLI 只接受以下事件：
 
@@ -48,9 +49,11 @@ CLI 只接受以下事件：
 - `staging_failed`
 - `approval_required`（只能由已持久化审批请求生成）
 
-消息字段仅包括固定事件、repository、完整 SHA、必要的 PR、environment，以及
-审批请求的 UUID/action/过期时间。不接受任意 URL、日志、stack trace、异常正文
-或扩展字段。发送使用现有有界重试；永久错误立即失败，重试耗尽返回非零。
+普通状态通知继续使用固定文字。`approval_required` 以交互卡片作为主要 UX，显示
+action 摘要、repository、可选 PR、完整 SHA、environment、过期时间和 request
+UUID，并提供 `批准`、`拒绝`、`等一下` 三个按钮。按钮 payload 只包含
+`request_id` 和 `action`，不携带 repository、SHA、environment、命令、Secret 或
+任何可执行动作。发送使用现有有界重试；永久错误立即失败，重试耗尽返回非零。
 
 ## 本地监督 CLI
 
@@ -89,7 +92,34 @@ python -m app.supervision_cli request-approval \
 始终先提交 `core.approval_requests`，随后才发送包含请求 UUID 的消息；发送失败时
 请求仍保留，可使用相同 idempotency key 安全重试。
 
-## 审批命令与授权
+## 卡片回调、授权与文字 fallback
+
+主要审批路径使用现有 Worker WebSocket 长连接接收新版
+`card.action.trigger` 回调，并通过 SDK 的独立
+`register_p2_card_action_trigger` handler 处理，不经过普通消息解析。回调必须包含
+有效的 callback event ID、按钮 action/request UUID、operator `open_id` 和
+`open_chat_id`。服务端只信任 request UUID，并从 PostgreSQL 重新加载 repository、
+SHA、environment、expiry 和当前决定状态。
+
+卡片动作语义：
+
+- `approve`：复用既有事务记录 `approved`；
+- `reject`：复用既有事务记录 `rejected`；
+- `wait`：取得 request row lock 并使用数据库时间检查 expiry/decision 后返回
+  “稍后处理 / 仍待审批”，不插入 `approval_decisions`、不消费 request、也不修改
+  `expires_at`。
+
+卡片 callback 要求 tenant allowlist、普通 sender allowlist、独立 approver
+allowlist 和精确 `FEISHU_SUPERVISION_CHAT_ID` 全部匹配。缺少 callback 字段、错误
+chat、未知/过期/已决定 request 或数据库不可用均 fail closed。callback event ID
+继续使用 `approval_decisions.feishu_event_id` 唯一约束保证 approve/reject 重放幂等；
+重复 `wait` 不产生决定或状态变更。日志只保存 outcome 和不可逆 callback 指纹。
+
+飞书开发者后台必须将“事件与回调”的回调订阅方式设为长连接，并添加新版卡片
+回传交互 `card.action.trigger`。应用仍需已有的机器人发消息能力；无需新增公网 HTTP
+callback、端口或容器。配置变更应按飞书要求发布应用版本后再做真实验收。
+
+既有严格文字命令保留为 fallback：
 
 只接受严格文本命令：
 
@@ -98,7 +128,7 @@ python -m app.supervision_cli request-approval \
 拒绝 <request-uuid>
 ```
 
-审批命令在普通 `core.raw_inputs` 持久化之前分流，因此有效或畸形的审批类命令
+文字审批命令在普通 `core.raw_inputs` 持久化之前分流，因此有效或畸形的审批类命令
 均不会作为普通输入保存。命令必须同时通过：
 
 1. tenant allowlist；
@@ -107,6 +137,9 @@ python -m app.supervision_cli request-approval \
 4. chat type allowlist；
 5. 独立 approver allowlist；
 6. 精确监督 chat ID。
+
+卡片点击和文字 fallback 都只记录决定。批准卡片显示“已批准”不代表 PR 已合并或
+Production 已部署；这些受保护动作仍完全属于 Phase 1D-F。
 
 未知、畸形、未授权、过期、冲突或数据库不可用均返回固定安全响应并 fail
 closed。日志仅记录结果代码和短消息指纹，不记录命令正文或身份原值。
@@ -130,18 +163,19 @@ closed。日志仅记录结果代码和短消息指纹，不记录命令正文�
 
 ## 验证与上线边界
 
-CI 使用 fake transport、fake identity 和临时 PostgreSQL，验证格式、授权、
-重试、幂等、并发、约束、trigger、migration 和 Alembic drift，不使用真实飞书
-凭据。
+CI 使用 fake transport、fake identity、fake card callback 和临时 PostgreSQL，
+验证卡片 payload、approve/reject/wait、授权、重试、幂等、并发、约束、trigger、
+migration 和 Alembic drift，不使用真实飞书凭据。
 
 合并后仍需单独人工批准：
 
 1. 同步精确 merge SHA 并要求其 `CI / Quality Gate` 成功；
 2. 确认 Production/Staging 不变量和备份恢复点；
-3. 在隔离目标验证 `0002`，再批准 Production forward migration 和 Worker
-   rollout；
-4. 使用非敏感固定通知验证主动消息权限；
-5. 验证允许/拒绝、未授权、重复和过期审批，不输出身份或 Secret；
+3. 确认 Production DB 保持 `0002` 且本 remediation 不含新 migration；
+4. 配置长连接 `card.action.trigger`，再单独批准 Worker-only rollout 并验证审批
+   卡片可送达；
+5. 通过真实卡片验证批准、拒绝、等一下、未授权、错误 chat、重复和过期审批，
+   不输出身份或 Secret；
 6. 确认审批只产生记录，不触发受保护动作。
 
 失败时停止，不自动 downgrade。代码可使用可审计 revert；schema 优先前向修复，

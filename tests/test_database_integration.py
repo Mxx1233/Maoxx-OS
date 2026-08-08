@@ -17,6 +17,7 @@ from app.models import ApprovalRequest, User
 from app.services.approval_service import (
     ApprovalCommand,
     create_approval_request,
+    process_approval_card_action,
     record_approval_decision,
 )
 
@@ -139,41 +140,102 @@ class DatabaseIntegrationTests(unittest.TestCase):
                     )
                 self.assertEqual(same_request.id, approve_request.id)
 
-                approve_command = ApprovalCommand(
-                    "approved",
-                    approve_request.id,
-                )
                 with session_factory() as session:
-                    approved = record_approval_decision(
+                    wait_request = create_approval_request(
                         session,
-                        command=approve_command,
+                        user_id=user_id,
+                        action_code="development_plan",
+                        repository="Example/Repository",
+                        pull_request_number=None,
+                        target_sha="f" * 40,
+                        target_environment="development",
+                        idempotency_key="wait-request",
+                        ttl_seconds=1800,
+                    )
+                    original_expiry = wait_request.expires_at
+                with session_factory() as session:
+                    waiting = process_approval_card_action(
+                        session,
+                        action="wait",
+                        request_id=wait_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
+                        feishu_event_id="event-wait",
+                        actor_user_id=user_id,
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
+                    )
+                self.assertEqual(waiting.code, "waiting")
+                with session_factory() as session:
+                    persisted_wait_request = session.get(
+                        ApprovalRequest,
+                        wait_request.id,
+                    )
+                    wait_decision_count = session.execute(
+                        text(
+                            "SELECT count(*) FROM core.approval_decisions "
+                            "WHERE request_id = :request_id"
+                        ),
+                        {"request_id": wait_request.id},
+                    ).scalar_one()
+                self.assertEqual(wait_decision_count, 0)
+                self.assertEqual(
+                    persisted_wait_request.expires_at,
+                    original_expiry,
+                )
+
+                with session_factory() as session:
+                    approved = process_approval_card_action(
+                        session,
+                        action="approve",
+                        request_id=approve_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-approve",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 self.assertEqual(approved.code, "recorded")
                 self.assertEqual(approved.decision_code, "approved")
 
                 with session_factory() as session:
-                    duplicate = record_approval_decision(
+                    duplicate = process_approval_card_action(
                         session,
-                        command=approve_command,
+                        action="approve",
+                        request_id=approve_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-approve",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 self.assertEqual(duplicate.code, "duplicate")
 
                 with session_factory() as session:
-                    conflicting = record_approval_decision(
+                    conflicting = process_approval_card_action(
                         session,
-                        command=ApprovalCommand(
-                            "rejected",
-                            approve_request.id,
-                        ),
+                        action="reject",
+                        request_id=approve_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-conflicting",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 self.assertEqual(conflicting.code, "already_decided")
 
@@ -190,15 +252,19 @@ class DatabaseIntegrationTests(unittest.TestCase):
                         ttl_seconds=1800,
                     )
                 with session_factory() as session:
-                    rejected = record_approval_decision(
+                    rejected = process_approval_card_action(
                         session,
-                        command=ApprovalCommand(
-                            "rejected",
-                            reject_request.id,
-                        ),
+                        action="reject",
+                        request_id=reject_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-reject",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 self.assertEqual(rejected.code, "recorded")
                 self.assertEqual(rejected.decision_code, "rejected")
@@ -217,23 +283,34 @@ class DatabaseIntegrationTests(unittest.TestCase):
                     session.add(expired_request)
                     session.commit()
                 with session_factory() as session:
-                    expired = record_approval_decision(
+                    expired = process_approval_card_action(
                         session,
-                        command=ApprovalCommand(
-                            "approved",
-                            expired_request.id,
-                        ),
+                        action="approve",
+                        request_id=expired_request.id,
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-expired",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 with session_factory() as session:
-                    unknown = record_approval_decision(
+                    unknown = process_approval_card_action(
                         session,
-                        command=ApprovalCommand("approved", uuid4()),
+                        action="approve",
+                        request_id=uuid4(),
+                        tenant_key="tenant-test",
+                        operator_open_id="fake-approver-id",
+                        chat_id="chat-test",
                         feishu_event_id="event-unknown",
                         actor_user_id=user_id,
-                        actor_open_id="fake-approver-id",
+                        allowed_tenant_keys=frozenset({"tenant-test"}),
+                        allowed_open_ids=frozenset({"fake-approver-id"}),
+                        approver_open_ids=frozenset({"fake-approver-id"}),
+                        supervision_chat_id="chat-test",
                     )
                 self.assertEqual(expired.code, "expired")
                 self.assertEqual(unknown.code, "unknown_request")

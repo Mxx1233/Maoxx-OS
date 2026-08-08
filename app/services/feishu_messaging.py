@@ -72,3 +72,40 @@ def send_structured_text(
         result.failure_reason or "none",
     )
     return result
+
+
+def send_interactive_card(
+    client: FeishuMessageClient,
+    *,
+    chat_id: str,
+    card: dict,
+    max_attempts: int,
+    backoff_seconds: float,
+) -> DeliveryResult:
+    if not chat_id:
+        raise ValueError("supervision chat is not configured")
+
+    request = (
+        CreateMessageRequest.builder()
+        .receive_id_type("chat_id")
+        .request_body(
+            CreateMessageRequestBody.builder()
+            .receive_id(chat_id)
+            .msg_type("interactive")
+            .content(json.dumps(card, ensure_ascii=False))
+            .build()
+        )
+        .build()
+    )
+    result = deliver_with_retry(
+        lambda: client.im.v1.message.create(request),
+        max_attempts=max_attempts,
+        backoff_seconds=backoff_seconds,
+    )
+    logger.info(
+        "event=feishu_approval_card_delivery sent=%s attempts=%s reason=%s",
+        result.sent,
+        result.attempts,
+        result.failure_reason or "none",
+    )
+    return result

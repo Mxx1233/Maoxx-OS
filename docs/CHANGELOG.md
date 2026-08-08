@@ -25,6 +25,8 @@
 
 ### Added
 
+- Phase 1D-E 交互审批卡片 remediation：`approval_required` 改为批准/拒绝/等一下三按钮主路径，现有 WebSocket Worker 注册独立 `card.action.trigger` callback；按钮只回传 action/request UUID，服务端重新加载数据库 request 并复用既有审批事务。`wait` 不写决定、不消费 request、不延长 TTL；文字命令保留为 fallback。当前仍为 `implemented_pending_verification`，未部署或执行真实卡片验收。
+
 - Phase 1D-E 飞书监督审批代码：固定结构通知、本地只读 `gh` 核验 CLI、严格 `批准/拒绝 <request-uuid>` 路由、独立 approver/chat 授权、`0002_phase_1d_e_approvals` request/decision 表、数据库时限、行锁、幂等/并发约束及 append-only trigger。当前未执行 Production migration、未部署 Worker 新版本、未发送真实飞书消息。
 - Phase 1D-D 最初增加隔离 Staging 的 Compose、无效示例配置、共享安全库、preflight/deploy/verify/stop 脚本、静态测试和 CI 检查；随后已完成本节 `Accepted` 记录的真实运行验收。
 - Phase 1D-C Codex Cloud repository workflow 文档：GitHub 连接仅限 `Mxx1233/Maoxx-OS`，Cloud 环境为无 Secrets 或生产凭据且禁用 agent internet access 的非生产环境；成功的只读验证保持 zero file diff。

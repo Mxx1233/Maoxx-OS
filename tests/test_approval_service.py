@@ -11,6 +11,7 @@ from app.services.approval_service import (
     approval_identity_fingerprint,
     approval_outcome_reply,
     parse_approval_command,
+    process_approval_card_action,
     process_approval_message,
     validate_approval_request_fields,
 )
@@ -144,6 +145,101 @@ class ApprovalServiceTests(unittest.TestCase):
             reply = approval_outcome_reply(outcome)
             self.assertNotIn(str(REQUEST_ID), reply)
             self.assertNotIn("fake-open-id", reply)
+
+    @patch("app.services.approval_service.record_approval_decision")
+    def test_card_approve_and_reject_reuse_decision_transaction(
+        self,
+        record: Mock,
+    ) -> None:
+        record.side_effect = (
+            ApprovalOutcome("recorded", "approved"),
+            ApprovalOutcome("recorded", "rejected"),
+        )
+        common = {
+            "db": Mock(),
+            "request_id": REQUEST_ID,
+            "tenant_key": "tenant-test",
+            "operator_open_id": "approver-test",
+            "chat_id": "chat-test",
+            "actor_user_id": REQUEST_ID,
+            "allowed_tenant_keys": frozenset({"tenant-test"}),
+            "allowed_open_ids": frozenset({"approver-test"}),
+            "approver_open_ids": frozenset({"approver-test"}),
+            "supervision_chat_id": "chat-test",
+        }
+        approved = process_approval_card_action(
+            action="approve",
+            feishu_event_id="event-approve",
+            **common,
+        )
+        rejected = process_approval_card_action(
+            action="reject",
+            feishu_event_id="event-reject",
+            **common,
+        )
+        self.assertEqual(approved.decision_code, "approved")
+        self.assertEqual(rejected.decision_code, "rejected")
+        self.assertEqual(
+            [
+                call.kwargs["command"].decision_code
+                for call in record.call_args_list
+            ],
+            ["approved", "rejected"],
+        )
+
+    @patch("app.services.approval_service.record_approval_decision")
+    def test_card_callback_authorization_fails_closed(
+        self,
+        record: Mock,
+    ) -> None:
+        common = {
+            "db": Mock(),
+            "action": "approve",
+            "request_id": REQUEST_ID,
+            "tenant_key": "tenant-test",
+            "operator_open_id": "approver-test",
+            "chat_id": "chat-test",
+            "feishu_event_id": "event-test",
+            "actor_user_id": REQUEST_ID,
+            "allowed_tenant_keys": frozenset({"tenant-test"}),
+            "allowed_open_ids": frozenset({"approver-test"}),
+            "approver_open_ids": frozenset({"approver-test"}),
+            "supervision_chat_id": "chat-test",
+        }
+        for changed in (
+            {"tenant_key": "wrong"},
+            {"operator_open_id": "wrong"},
+            {"chat_id": "wrong"},
+            {"feishu_event_id": ""},
+        ):
+            with self.subTest(changed=changed):
+                outcome = process_approval_card_action(**(common | changed))
+                self.assertIn(outcome.code, {"unauthorized", "invalid_event"})
+        record.assert_not_called()
+
+    @patch("app.services.approval_service.inspect_pending_approval_request")
+    def test_wait_does_not_call_decision_writer(self, inspect: Mock) -> None:
+        inspect.return_value = ApprovalOutcome("waiting")
+        with patch(
+            "app.services.approval_service.record_approval_decision"
+        ) as record:
+            outcome = process_approval_card_action(
+                db=Mock(),
+                action="wait",
+                request_id=REQUEST_ID,
+                tenant_key="tenant-test",
+                operator_open_id="approver-test",
+                chat_id="chat-test",
+                feishu_event_id="event-wait",
+                actor_user_id=REQUEST_ID,
+                allowed_tenant_keys=frozenset({"tenant-test"}),
+                allowed_open_ids=frozenset({"approver-test"}),
+                approver_open_ids=frozenset({"approver-test"}),
+                supervision_chat_id="chat-test",
+            )
+        self.assertEqual(outcome, ApprovalOutcome("waiting"))
+        inspect.assert_called_once()
+        record.assert_not_called()
 
     def test_database_query_failure_fails_closed(self) -> None:
         db = Mock()

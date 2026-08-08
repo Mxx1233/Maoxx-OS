@@ -25,7 +25,20 @@
 
 ## Phase 1D-E 监督审批
 
-Phase 1D-E 复用现有 WebSocket Worker，支持固定监督事件和严格文本审批：
+Phase 1D-E 复用现有 WebSocket Worker。审批请求以三按钮交互卡片作为主要 UX：
+
+```text
+[批准] [拒绝] [等一下]
+```
+
+Worker 通过独立 `card.action.trigger` 长连接 callback handler 处理点击，重新从
+PostgreSQL 加载 request，并要求 tenant、普通 sender、独立 approver 和精确监督
+chat 全部匹配。`批准/拒绝` 复用既有 append-only 决定事务；`等一下` 不写决定、
+不消费 request 且不延长 TTL。卡片 payload 只有 action 和 request UUID，不包含
+受保护动作或权威 repository/SHA/environment 数据。
+
+飞书开发者后台需把回调订阅方式设为长连接，并订阅新版卡片回传交互
+`card.action.trigger`。既有严格文本审批继续作为 fallback：
 
 ```text
 批准 <request-uuid>
@@ -34,12 +47,14 @@ Phase 1D-E 复用现有 WebSocket Worker，支持固定监督事件和严格文�
 
 审批命令在普通输入持久化前分流，并额外要求独立 approver allowlist 和固定 supervision chat。决定写入 append-only 审计表，不触发 GitHub 或部署动作。主动通知由服务器本地 CLI 发起，可选使用只读 `gh` 核实精确 commit、PR head 和 `CI / Quality Gate`。
 
-该能力当前为 `implemented_pending_verification`。Production migration、Worker 新版本和主动消息权限均未部署/验证；真实飞书测试必须在合并后单独批准。完整说明见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
+该能力保持 `implemented_pending_verification`；交互卡片代码必须经 PR/CI/评审和
+独立 Worker rollout 后，以真实卡片点击完成验收。完整说明见
+[Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
 
 ## 后续能力
 
 - 图片、视频和文件接收及安全下载。
-- 交互卡片和按钮回调。
+- 通用业务交互卡片和动态 card workflow。
 - AI 提取候选的确认、修正和拒绝。
 - 任务、提醒、项目和报告的卡片操作。
 
