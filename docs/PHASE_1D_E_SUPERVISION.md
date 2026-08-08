@@ -1,9 +1,10 @@
 # Phase 1D-E Feishu Supervision and Interactive Approval
 
-Phase 1D-E 当前为 `implemented_pending_verification`。Phase 1D-D 已通过真实
-Staging 运行验收并标记为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A
-保持 `not_started`。本阶段只实现监督通知和人工审批记录，不执行受保护动作，
-不进入 Phase 1D-F。
+Phase 1D-E 当前为 `accepted`。Production 0002、Worker rollout、interactive-card
+批准/拒绝/两次等一下和 fail-closed runtime probes 已完成验收；无第二个真实 Feishu
+身份的 unauthorized-human 路径保留为已声明外部限制，并有自动化证据。Phase 1D
+保持 `in_progress`，Phase 2A 保持 `not_started`。本阶段只实现监督通知和人工审批
+记录，不执行受保护动作。
 
 ## 边界
 
@@ -32,10 +33,9 @@ Staging Worker、GitHub webhook、poller 或自动 PR/CI 监控。GitHub PR、re
 缺失 chat、空审批人 allowlist 或越界 TTL 均 fail closed。App Secret、Token、
 完整身份标识和 `DATABASE_URL` 不得进入 Git、日志、PR、测试或审批表。
 
-Production 数据库已经位于 `0002_phase_1d_e_approvals`，此前文字 fallback Worker
-也已完成独立 rollout。本 remediation PR 不读取 Production 凭据、不发送真实
-消息，也不修改 Production 或 Accepted Staging；新卡片路径仍须在合并后单独批准
-Worker rollout 和真实飞书验收。
+Production 数据库已经位于 `0002_phase_1d_e_approvals`，文字 fallback 与卡片 Worker
+均已完成独立 rollout 和真实验收。Phase 1D-F 仍须通过独立 governed workflow，且
+不得把 Phase 1D-E 的决定本身视为部署授权消费或受保护动作执行。
 
 ## 固定通知与审批卡片
 
@@ -161,22 +161,14 @@ closed。日志仅记录结果代码和短消息指纹，不记录命令正文�
 只有一个能写入。数据库 trigger 禁止 UPDATE/DELETE 决策行，应用不提供修改或
 删除路径。两个外键均使用 `ON DELETE RESTRICT`。
 
-## 验证与上线边界
+## 验收结果与后续边界
 
-CI 使用 fake transport、fake identity、fake card callback 和临时 PostgreSQL，
-验证卡片 payload、approve/reject/wait、授权、重试、幂等、并发、约束、trigger、
-migration 和 Alembic drift，不使用真实飞书凭据。
-
-合并后仍需单独人工批准：
-
-1. 同步精确 merge SHA 并要求其 `CI / Quality Gate` 成功；
-2. 确认 Production/Staging 不变量和备份恢复点；
-3. 确认 Production DB 保持 `0002` 且本 remediation 不含新 migration；
-4. 配置长连接 `card.action.trigger`，再单独批准 Worker-only rollout 并验证审批
-   卡片可送达；
-5. 通过真实卡片验证批准、拒绝、等一下、未授权、错误 chat、重复和过期审批，
-   不输出身份或 Secret；
-6. 确认审批只产生记录，不触发受保护动作。
+CI 使用 fake transport、fake identity、fake card callback 和临时 PostgreSQL 验证
+卡片 payload、approve/reject/wait、授权、重试、幂等、并发、约束、trigger、migration
+和 Alembic drift。Production 已完成真实批准、拒绝、两次等一下、重复、过期和
+append-only 验收；审批只产生记录，不触发受保护动作。Phase 1D-F 若消费 Production
+部署或 rollback 审批，必须使用独立精确 binding 和一次性原子 consumption，并经
+单独 PR、CI、review、migration 与 runtime approval。
 
 失败时停止，不自动 downgrade。代码可使用可审计 revert；schema 优先前向修复，
 审批审计表和已写入决定保留。

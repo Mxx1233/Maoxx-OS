@@ -13,7 +13,12 @@ from app.services.feishu_authorization import authorize_feishu_message
 
 
 APPROVAL_ACTIONS = frozenset(
-    {"development_plan", "merge_pr", "production_deploy"}
+    {
+        "development_plan",
+        "merge_pr",
+        "production_deploy",
+        "rollback_production",
+    }
 )
 TARGET_ENVIRONMENTS = frozenset({"development", "staging", "production"})
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -111,6 +116,7 @@ def validate_approval_request_fields(
         "development_plan": "development",
         "merge_pr": "staging",
         "production_deploy": "production",
+        "rollback_production": "production",
     }[action_code]
     if target_environment != expected_environment:
         raise ApprovalValidationError("action/environment mismatch")

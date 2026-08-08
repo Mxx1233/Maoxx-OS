@@ -88,6 +88,7 @@ class SupervisionNotification:
                 "development_plan": "development",
                 "merge_pr": "staging",
                 "production_deploy": "production",
+                "rollback_production": "production",
             }[self.action_code]
             if self.target_environment != expected_environment:
                 raise NotificationValidationError(

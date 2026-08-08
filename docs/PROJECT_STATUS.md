@@ -1,10 +1,10 @@
 # Maoxx OS 当前状态
 
-更新时间：2026-08-07
+更新时间：2026-08-08
 
 ## 当前阶段
 
-阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B、Phase 1D-C 和 Phase 1D-D 为 `accepted`，Phase 1D-E 为 `implemented_pending_verification`。Phase 2A 仍为 `not_started`。
+阶段 1 和阶段 1C 已验收。阶段 1D：Cloud Development Control Plane 为 `in_progress`；Phase 1D-0 已完成，Phase 1D-A 至 Phase 1D-E 为 `accepted`，Phase 1D-F 为 `implemented_pending_verification`。Phase 2A 仍为 `not_started`。
 
 GitHub 仓库已设为 Public。Active `Protect main` Ruleset 已禁止删除、force push 和直接 push，要求通过 PR 并解决 conversations；`CI / Quality Gate` 已配置为唯一 required status check。
 
@@ -12,7 +12,7 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 
 ## 当前 Alembic revision
 
-运行中 Production 和 accepted Staging 均为 `0001_core_foundation`。本 Phase 1D-E PR 新增未部署的 additive head `0002_phase_1d_e_approvals`；其空库 upgrade、current/head、约束、并发审批和 `alembic check` 已在临时 PostgreSQL 通过。Production 尚未执行该 migration。
+运行中 Production 为 `0002_phase_1d_e_approvals`；accepted Staging 保持其已验收 revision 且未被本实现修改。本 Phase 1D-F 分支新增尚未部署的兼容扩展 head `0003_phase_1d_f_deployment`；空库 upgrade、current/head/check、事务、并发、锁、rollback 和 append-only 已在 disposable PostgreSQL 验证。Production 尚未执行 0003。
 
 ## 已完成
 
@@ -42,7 +42,8 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 - 自动化基线扩展为 21 项默认执行测试及 1 项显式启用的隔离 PostgreSQL migration/integration 测试。
 - Phase 1D 部署前备份非空且 SHA-256 校验通过，并完成隔离数据库恢复验证；备份 revision 为 `0001_core_foundation`，关键行数为 users=1、entities=0、raw_inputs=9。
 - Phase 1D-D 真实 Staging 运行验收通过：immutable SHA build、retained DB volume 复用、Alembic 幂等、DB/API health、HTTP、network/volume/port/mount/image 隔离与 Production 前后不变量均通过；Staging db/api 保持运行且 Worker 关闭。
-- Phase 1D-E 代码实现固定通知、本地只读 GitHub 核验 CLI、严格文字审批、独立 approver allowlist、时限/幂等/并发事务和 append-only 审批审计；仍等待合并后 migration、Worker rollout 和真实飞书验收。
+- Phase 1D-E 已 accepted：Production 0002、interactive approval card Worker、批准/拒绝/两次等一下和 fail-closed runtime probes 已通过；unauthorized-human 因无第二真实身份保留为外部限制，自动化路径通过。
+- Phase 1D-F 已实现不可变 deployment intent/artifact、同 digest Staging acceptance、精确 approval binding/一次消费、separation of duty、backup/migration/resource gates、Production lease、受限 executor、health/reconciliation、独立 rollback、Feishu reference 与 append-only audit；等待 PR/CI/Agent C review 和真实演练。
 
 ## Phase 1D-0 完成结果
 
@@ -76,7 +77,7 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 
 ## 当前运行基线
 
-- 当前 Alembic revision：`0001_core_foundation`。
+- 当前 Production Alembic revision：`0002_phase_1d_e_approvals`；分支 code head 为尚未部署的 `0003_phase_1d_f_deployment`。
 - Compose 服务：`db`、`api`、`feishu-worker`。
 - API 绑定：`127.0.0.1:8000`。
 - PostgreSQL 不暴露宿主机端口。
@@ -102,11 +103,11 @@ Phase 1D-A 当前为 `accepted`。PR #2、#3、#4 已通过独立分支和 Pull 
 - GitHub Ruleset 和治理文件已通过 Phase 1D-A 验收；Phase 1D-B Actions CI 五个 job 已通过，required `CI / Quality Gate` 的失败阻断和恢复已验证。
 - Phase 1D-C 仓库工作流为 `accepted`：Codex Cloud GitHub 连接仅限 `Mxx1233/Maoxx-OS`，非生产 Cloud 环境禁用 agent internet access，Secrets 为 none 且不含生产凭据；只读验证任务成功且为 zero file diff。Cloud 分支 `codex/implement-phase-1d-c-codex-cloud-validation` 已发布，Pull Request #8 已成功创建和更新。
 - PR #8 最新 `pull_request` synchronize event 自动触发五个 CI job，全部通过，包括 required `CI / Quality Gate`。没有绕过 CI 要求、直接写 `main`、自动批准或合并，也没有访问 Production。
-- Phase 1D-D 已 accepted。Phase 1D-E 尚未部署到 Production，主动发送权限和真实允许/拒绝/重复/过期审批尚未验收；受控 Production 部署仍属于 Phase 1D-F。
+- Phase 1D-D 和 Phase 1D-E 已 accepted。Phase 1D-F 实现已完成但尚未合并、迁移或执行真实同-digest Staging→Production/rollback 演练。
 
 ## 下一步
 
-Phase 1D-D 已验收。Phase 1D-E 为 `implemented_pending_verification`，等待 PR 人工审查、合并、精确 merge-SHA CI、数据库备份/迁移评审、Worker rollout 和单独批准的真实飞书验收。不得自动批准、合并或部署，不得进入 Phase 1D-F 或 Phase 2A。详细边界见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
+Phase 1D-E 已验收。Phase 1D-F 为 `implemented_pending_verification`，等待 PR 人工审查、合并、精确 merge-SHA CI、0003 migration/backup 评审和单独批准的真实同-digest Staging→Production/rollback 演练。不得自动批准、合并或部署，不得进入 Phase 2A。详细边界见 [Phase 1D-F Controlled Deployment](PHASE_1D_F_CONTROLLED_DEPLOYMENT.md)。
 
 ## 最近一次验收
 

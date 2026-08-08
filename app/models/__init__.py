@@ -2,8 +2,18 @@ from app.models.base import Base
 from app.models.core import (
     ApprovalDecision,
     ApprovalRequest,
+    DeploymentApprovalBinding,
+    DeploymentApprovalConsumption,
+    DeploymentArtifact,
+    DeploymentEvidence,
+    DeploymentIntent,
+    DeploymentLock,
+    DeploymentRollback,
+    DeploymentStateEvent,
     Entity,
     RawInput,
+    StagingAcceptance,
+    StagingAcceptanceInvalidation,
     User,
 )
 
@@ -14,4 +24,14 @@ __all__ = [
     "RawInput",
     "ApprovalRequest",
     "ApprovalDecision",
+    "DeploymentIntent",
+    "DeploymentArtifact",
+    "DeploymentStateEvent",
+    "StagingAcceptance",
+    "StagingAcceptanceInvalidation",
+    "DeploymentApprovalBinding",
+    "DeploymentApprovalConsumption",
+    "DeploymentLock",
+    "DeploymentEvidence",
+    "DeploymentRollback",
 ]
