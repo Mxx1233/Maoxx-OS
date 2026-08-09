@@ -4,7 +4,7 @@
 
 Phase 1D 当前状态为 `in_progress`。Phase 1D-0：Server Observability and Execution Foundation 已完成，但它只覆盖服务器端可观测性、运行健康、测试和恢复基础，不等同于完整 Cloud Development Control Plane。
 
-Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B、Phase 1D-C 和 Phase 1D-D 为 `accepted`，Phase 1D-E 为 `implemented_pending_verification`，Phase 1D 整体保持 `in_progress`。Phase 2A 保持 `not_started`；不得进入 Phase 1D-F 或 Phase 2A。
+Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A 至 Phase 1D-E 为 `accepted`，Phase 1D-F 为 `implemented_pending_verification`，Phase 1D 整体保持 `in_progress`。Phase 2A 保持 `not_started`；不得进入 Phase 2A。
 
 本审计只使用：`configured`、`partially_configured`、`not_configured`、`cannot_verify`。仓库已由用户确认设为 Public；`Protect main` Ruleset 已启用。其他 GitHub 和 Codex Cloud 网页设置在没有证据时仍标记 `cannot_verify`。
 
@@ -37,16 +37,16 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B、Phase 1D-C �
 | 23 | staging database isolation | configured | retained PostgreSQL volume、internal network、无宿主端口和 Alembic 幂等已验证。 |
 | 24 | staging storage isolation | configured | 独立 storage realpath、mount 和 Production 不重叠已验证。 |
 | 25 | staging deployment workflow | configured | immutable build、health、migration、验证、失败安全清理和成功保持运行均已验证。 |
-| 26 | Feishu development-plan approval | partially_configured | 文字审批和审计代码已实现，尚未部署/真实验收。 |
-| 27 | Feishu PR notification | partially_configured | 固定通知和只读 `gh` CLI 已实现，主动消息权限未验收。 |
-| 28 | Feishu merge approval | partially_configured | merge action 可记录决定，但不会 merge；尚未真实验收。 |
-| 29 | Feishu staging-result notification | partially_configured | 固定 staging started/passed/failed 已实现，尚未真实发送。 |
-| 30 | Feishu production-deployment approval | partially_configured | production action 可记录决定但不部署；Phase 1D-F 尚未消费。 |
-| 31 | approval identity verification | partially_configured | tenant/sender/chat、独立 approver 和固定 supervision chat 已实现，尚未部署。 |
-| 32 | approval audit record | partially_configured | request/append-only decision、时限、幂等和并发约束已通过隔离测试，Production migration 未执行。 |
-| 33 | controlled production deployment | not_configured | 当前为服务器人工 Compose 操作，无受控部署工作流。 |
-| 34 | deployment rollback | partially_configured | 运维手册有人工回滚原则，但无自动化、版本绑定和演练闭环。 |
-| 35 | production backup before migration | partially_configured | 有备份/恢复规则和已验证流程，但无部署门禁自动强制。 |
+| 26 | Feishu development-plan approval | configured | 文字 fallback 和 interactive-card 决定记录已部署并完成真实 runtime acceptance。 |
+| 27 | Feishu PR notification | configured | 固定通知、只读 `gh` CLI 和主动消息能力已验收。 |
+| 28 | Feishu merge approval | configured | merge action 可记录决定但不会 merge；受保护动作边界已验收。 |
+| 29 | Feishu staging-result notification | configured | 固定 staging started/passed/failed 通知能力已实现并纳入已验收监督边界。 |
+| 30 | Feishu production-deployment approval | partially_configured | production action 已真实记录决定且不部署；Phase 1D-F 一次性消费实现等待 PR/CI/运行验收。 |
+| 31 | approval identity verification | configured | tenant/sender/chat、独立 approver、固定 supervision chat 和 card callback 已完成真实验收。 |
+| 32 | approval audit record | configured | Production 0002、request/append-only decision、时限、幂等和并发约束已验收。 |
+| 33 | controlled production deployment | partially_configured | 本分支已实现持久门禁和专用 executor，尚未合并、部署或真实演练。 |
+| 34 | deployment rollback | partially_configured | 已实现独立 intent/approval/locking/health/state flow，尚未真实演练。 |
+| 35 | production backup before migration | partially_configured | 既有备份恢复已验证，本分支新增 deployment evidence 门禁；尚未真实部署验收。 |
 
 ## 子阶段真实状态与验收标准
 
@@ -77,15 +77,15 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B、Phase 1D-C �
 
 ### Phase 1D-E：Feishu Supervision and Approval
 
-- 当前阶段状态：`implemented_pending_verification`；审计项 26–32 为 `partially_configured`，因为代码/隔离数据库测试完成但 Production migration、Worker rollout 和真实飞书权限/交互尚未验收。
+- 当前阶段状态：`accepted`；Production 0002、Worker rollout、interactive-card 批准/拒绝/两次等一下及受控 fail-closed probes 已完成 runtime acceptance。
 - 实施：复用现有授权原语，设计任务/计划/CI/PR/Staging 通知和计划、合并、Production 部署审批；增加审批身份、幂等和只追加审计。任何新表先单独评审。
 - 验收：允许用户可批准/退回；未授权用户、群聊、重复和过期审批均被拒绝或幂等处理；每次审批可追溯且不泄露敏感内容。
 - 边界：审批只记录决定，不 mutate GitHub、不 merge、不部署；详见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
 
 ### Phase 1D-F：Controlled Deployment
 
-- 当前状态：`partially_configured`。
-- 实施：将 main SHA、构建镜像、Staging 结果、Production 独立审批、备份校验、migration 风险检查、健康检查、回滚和飞书结果通知串成受控流程。
+- 当前状态：`implemented_pending_verification`。
+- 实施：本分支已将 main SHA、单次 immutable artifact、Staging 结果、Production 独立审批及原子一次性消费、备份校验、migration 风险、resource gate、exclusive lease、健康检查、reconciliation、独立 rollback 和飞书结果引用串成受控流程。
 - 验收：未经独立审批不能部署 Production；镜像可追溯到 Git SHA；migration 前备份和风险检查是强制门禁；失败可回到已验证版本；不删除 volume、不执行破坏性 downgrade。
 
 ## 尚未配置的控制与文件
@@ -93,15 +93,14 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B、Phase 1D-C �
 - 独立 API 测试
 - destructive migration scan 脚本及测试
 - secret scan 配置
-- 受控部署与回滚脚本/工作流
-- Phase 1D-E Production migration/Worker rollout 和真实主动消息/审批验收
+- Phase 1D-F 真实同 digest Staging→Production 与 rollback 演练
 
 ## 需要用户手动完成的网页操作
 
 1. GitHub：Public 仓库和 main Ruleset 已配置；`CI / Quality Gate` 是唯一 required status check。后续若评审 CODEOWNERS review、required approvals、secret scanning 或 Push Protection，不得把生产 Secret 放入 Actions。
 2. Codex Cloud：PR #8 已创建和更新，最新 synchronize CI 五项全绿且 required `CI / Quality Gate` 通过；保持人工审查和合并边界，不得自动批准或合并。
-3. Feishu：合并后单独批准主动发消息权限及真实允许/拒绝/重复/过期文字审批验收；Phase 1D-E 不使用交互卡片。
-4. Production：在受控部署设计评审后确认审批人、备份位置、维护窗口和回滚责任人。
+3. Feishu：Phase 1D-E interactive-card 已验收；Phase 1D-F 通知和部署/rollback 审批消费仍须在合并后单独运行验收。
+4. Production：Phase 1D-F PR 评审后，另行批准 0003、维护窗口、同 digest 演练和 rollback 责任人。
 
 ## 推荐实施顺序
 
@@ -109,9 +108,9 @@ Phase 1 和 Phase 1C 保持 `accepted`。Phase 1D-A、Phase 1D-B、Phase 1D-C �
 2. Phase 1D-B：已验收；PR 已具备可强制执行并验证过失败路径的单一汇总质量门禁。
 3. Phase 1D-C：已验收 Codex Cloud 在相同治理和 CI 下完成的最小权限验证。
 4. Phase 1D-D：已验收与 Production 隔离的 Staging 目标。
-5. Phase 1D-E：代码已实现，等待合并后 Production migration/Worker 和真实飞书验收。
-6. Phase 1D-F：最后把已验证能力串成受控生产部署闭环。
+5. Phase 1D-E：已完成 Production interactive-card runtime acceptance。
+6. Phase 1D-F：实现已进入 governed PR/CI/review，尚未部署或真实演练。
 
 ## 最小可执行的下一个任务
 
-Phase 1D-D 已验收；Phase 1D-E 为 `implemented_pending_verification`，等待人工审查、合并、精确 merge-SHA CI、备份/migration 审批、Worker rollout 和单独真实飞书验收。不得自动批准、合并或部署，不得进入 Phase 1D-F 或 Phase 2A。
+Phase 1D-E 已验收。Phase 1D-F 为 `implemented_pending_verification`，等待 PR 人工审查、合并、精确 merge-SHA CI、0003 migration/backup 评审和另行批准的同 digest Staging→Production/rollback 演练。不得自动批准、合并或部署，不得进入 Phase 2A。

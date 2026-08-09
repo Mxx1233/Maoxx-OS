@@ -493,7 +493,10 @@ class DatabaseIntegrationTests(unittest.TestCase):
             finally:
                 engine.dispose()
 
-            self.assertEqual(revision, "0002_phase_1d_e_approvals")
+            self.assertEqual(
+                revision,
+                "0003_phase_1d_f_deployment",
+            )
             self.assertIn("ix_entities_user_type_status", indexes)
             self.assertIn("ix_raw_inputs_user_received", indexes)
             self.assertIn("uq_raw_inputs_channel_message", constraints)
@@ -529,6 +532,14 @@ class DatabaseIntegrationTests(unittest.TestCase):
             )
             self.assertIn(
                 "trg_approval_decisions_append_only",
+                triggers,
+            )
+            self.assertIn(
+                "trg_deployment_state_events_append_only",
+                triggers,
+            )
+            self.assertIn(
+                "trg_deployment_evidence_append_only",
                 triggers,
             )
         finally:

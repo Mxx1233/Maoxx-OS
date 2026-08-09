@@ -21,7 +21,7 @@
 
 白名单通过环境变量配置，不得把真实 `open_id`、`tenant_key`、App Secret 或 Token 写入源码、文档、测试夹具或 Git。拒绝事件不得入库或回显内容，日志只能记录脱敏标识和拒绝原因。
 
-代码采用默认拒绝策略，chat type 默认仅允许 `p2p`。服务器真实白名单和新 Worker 尚未部署验收，因此不能把授权写成生产已生效。成功确认的新实现固定回复“已记录。”，群聊和其他场景均不回显敏感原文。
+代码采用默认拒绝策略，chat type 默认仅允许 `p2p`。Production 真实白名单、Worker 和 interactive-card callback 已完成 Phase 1D-E runtime acceptance。成功确认固定回复“已记录。”，群聊和其他场景均不回显敏感原文。
 
 ## Phase 1D-E 监督审批
 
@@ -47,8 +47,9 @@ chat 全部匹配。`批准/拒绝` 复用既有 append-only 决定事务；`等
 
 审批命令在普通输入持久化前分流，并额外要求独立 approver allowlist 和固定 supervision chat。决定写入 append-only 审计表，不触发 GitHub 或部署动作。主动通知由服务器本地 CLI 发起，可选使用只读 `gh` 核实精确 commit、PR head 和 `CI / Quality Gate`。
 
-该能力保持 `implemented_pending_verification`；交互卡片代码必须经 PR/CI/评审和
-独立 Worker rollout 后，以真实卡片点击完成验收。完整说明见
+该能力为 `accepted`；Production 已通过真实批准、拒绝、两次等一下和受控
+fail-closed runtime probes。无第二个真实 Feishu 身份的 unauthorized-human 路径保留
+为已声明外部限制并有自动化证据。完整说明见
 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
 
 ## 后续能力

@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     feishu_reply_max_attempts: int = Field(default=3, ge=1, le=5)
     feishu_reply_backoff_seconds: float = Field(default=0.5, ge=0, le=30)
 
+    deployment_github_repository: str = "Mxx1233/Maoxx-OS"
+    deployment_github_repository_id: int = Field(default=0, ge=0)
+    deployment_github_workflow_id: int = Field(default=0, ge=0)
+    deployment_github_workflow_path: str = ".github/workflows/ci.yml"
+
     app_env: str = "development"
     app_timezone: str = "Europe/Berlin"
     local_storage_root: str = "/app/storage"

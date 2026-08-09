@@ -1038,6 +1038,7 @@ class StagingScriptTests(unittest.TestCase):
         self.assertIn("accepted", combined)
         self.assertIn("Phase 1D-E", combined)
         self.assertIn("implemented_pending_verification", combined)
+        self.assertIn("Phase 1D-F", combined)
         self.assertIn("in_progress", combined)
         self.assertIn("not_started", combined)
 

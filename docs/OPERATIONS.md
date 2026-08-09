@@ -114,9 +114,9 @@ Docker build 只使用批准 SHA 的 `git archive` 临时 context 和其中的 D
 
 ## Phase 1D-E 飞书监督审批
 
-实现和命令见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。当前代码为 `implemented_pending_verification`，不要在本 PR 阶段运行 CLI、Production migration 或真实飞书发送。
+实现和命令见 [Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。Phase 1D-E 已完成 Production interactive-card runtime acceptance 并为 `accepted`。
 
-合并后必须先完成精确 merge-SHA CI、Production 备份/恢复点和 migration 人工审查；再单独批准 `0002` forward migration、Worker rollout 及固定非敏感消息测试。若主动发送权限、授权、数据库或飞书查询状态不明确，立即停止。失败时不自动 downgrade，不删除审批审计数据。
+Phase 1D-F 的实现和部署门禁见 [Phase 1D-F Controlled Deployment](PHASE_1D_F_CONTROLLED_DEPLOYMENT.md)。0003 尚未部署；本 PR 阶段不得执行 Production migration、Staging mutation 或 executor。合并后仍须精确 merge-SHA CI、Production backup、0003 独立 migration 评审和受控 runtime 演练。失败时不自动 downgrade，不删除审批或 deployment audit。
 
 ## Worker 回复策略
 

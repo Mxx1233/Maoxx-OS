@@ -2,7 +2,7 @@
 
 ## 当前数据库
 
-业务 schema 为 `core`。运行中 Production/accepted Staging revision 为 `0001_core_foundation`；Phase 1D-E 代码新增尚未部署的 additive head `0002_phase_1d_e_approvals`。
+业务 schema 为 `core`。运行中 Production revision 为 `0002_phase_1d_e_approvals`；本 Phase 1D-F 分支新增尚未部署的兼容扩展 head `0003_phase_1d_f_deployment`。accepted Staging 不由本实现修改。
 
 - `core.users`：用户资料和用户级默认设置。
 - `core.entities`：跨模块通用实体骨架。
@@ -11,6 +11,17 @@
 - `core.approval_decisions`：每请求唯一的 approved/rejected 只追加决定，保存 actor user、完整 SHA-256 身份指纹和唯一飞书 event ID。
 
 `approval_decisions` 由数据库 trigger 禁止 UPDATE/DELETE，两个表的用户和请求外键均为 `ON DELETE RESTRICT`。决定事务锁定请求行并使用数据库时间判断过期。Phase 1D-E 只记录决定，不执行 merge 或部署。
+
+Phase 1D-F 增加 deployment intents/artifacts/state events、Staging acceptance 与 invalidation、
+approval bindings/consumptions、Production lease、唯一 execution attempt、evidence 和 rollback
+linkage。当前 lease 是唯一可更新运维表；其余 Phase 1D-F 审计表均由 trigger 禁止
+UPDATE/DELETE。lease 固定为 server-derived `production:global` domain，并带递增 fencing
+token；过期 owner 必须由 authoritative runtime reconciliation 安全确认后才可接管。一次性
+consumption 与进入 deploying state/唯一 execution identity 在同一事务建立。
+
+0003 还增加 `core.external_identities`：仅保存 Feishu subject 的不可逆 fingerprint，并以
+provider+subject、provider+user 双唯一约束保证一个 authenticated Feishu identity 精确映射
+到一个 canonical `core.users` principal；缺失或歧义映射 fail closed。
 
 ## 阶段 2 设计范围
 
@@ -75,4 +86,4 @@
 
 ## 当前迁移注意事项
 
-阶段 1C 已让 ORM 准确声明 `0001_core_foundation` 创建的索引与唯一约束。Phase 1D-E 未修改已执行的 `0001`；additive `0002` 已在临时 PostgreSQL 验证 upgrade/head/check、索引、约束、并发和 append-only trigger。Production migration 必须在合并后备份及单独批准，不执行自动 downgrade，也不创建阶段 2 表。
+阶段 1C 已让 ORM 准确声明 `0001_core_foundation` 创建的索引与唯一约束。Phase 1D-E 的 0002 已在 Production 验收。0003 不修改既有决定数据，只兼容扩展 approval action constraint 并新增 Phase 1D-F 运维表；已在临时 PostgreSQL 验证 upgrade/head/check、锁、并发 consumption、rollback 和 append-only trigger。Production migration 必须在合并后备份及单独批准，不执行自动 downgrade，也不创建阶段 2 表。

@@ -18,6 +18,7 @@
 
 ### Accepted
 
+- Phase 1D-E Production runtime acceptance 通过：0002 migration、interactive-card Worker、批准、拒绝、同一请求两次等一下、重复/过期/append-only 与受保护动作不执行边界均已验证；无第二真实 Feishu 身份的 unauthorized-human 路径作为外部限制保留，并有自动化证据。
 - Phase 1D-D Staging 真实运行验收通过：批准 SHA 的 immutable image build、retained PostgreSQL volume 复用、DB/API health、Alembic upgrade 幂等、HTTP environment/database、network/volume/port/mount/image 隔离和 Production 前后不变量均通过；Staging db/api 保持运行、Worker 关闭，Production 未变化。
 - Phase 1D-A GitHub Development Governance 已通过用户验收：PR #2、#3、#4 独立合并，main Ruleset、模板、CODEOWNERS 和 migration 人工审查规则均已验证。
 - Phase 1D-B GitHub Actions CI 已通过验收：五个 job 全绿，`CI / Quality Gate` 已成为唯一 required check，临时失败与普通修复 commit 已验证失败阻断和恢复路径。
@@ -25,7 +26,9 @@
 
 ### Added
 
-- Phase 1D-E 交互审批卡片 remediation：`approval_required` 改为批准/拒绝/等一下三按钮主路径，现有 WebSocket Worker 注册独立 `card.action.trigger` callback；按钮只回传 action/request UUID，服务端重新加载数据库 request 并复用既有审批事务。`wait` 不写决定、不消费 request、不延长 TTL；文字命令保留为 fallback。当前仍为 `implemented_pending_verification`，未部署或执行真实卡片验收。
+- Phase 1D-F Controlled Deployment V1：新增兼容扩展 0003，持久化 immutable deployment intent/artifact、append-only state/evidence、Staging acceptance/invalidation、exact approval binding 和一次性 consumption、Production bounded lease 与 rollback linkage；实现 protected-main/CI、same-digest、backup/migration/resource、separation-of-duty、service allowlist、health/reconciliation 和 fixed Feishu reference 门禁。当前为 `implemented_pending_verification`，未部署 0003、未修改 accepted Staging、未执行 Production deployment。
+
+- Phase 1D-E 交互审批卡片 remediation：`approval_required` 改为批准/拒绝/等一下三按钮主路径，现有 WebSocket Worker 注册独立 `card.action.trigger` callback；按钮只回传 action/request UUID，服务端重新加载数据库 request 并复用既有审批事务。`wait` 不写决定、不消费 request、不延长 TTL；文字命令保留为 fallback。后续已完成本节 `Accepted` 记录的真实卡片验收。
 
 - Phase 1D-E 飞书监督审批代码：固定结构通知、本地只读 `gh` 核验 CLI、严格 `批准/拒绝 <request-uuid>` 路由、独立 approver/chat 授权、`0002_phase_1d_e_approvals` request/decision 表、数据库时限、行锁、幂等/并发约束及 append-only trigger。当前未执行 Production migration、未部署 Worker 新版本、未发送真实飞书消息。
 - Phase 1D-D 最初增加隔离 Staging 的 Compose、无效示例配置、共享安全库、preflight/deploy/verify/stop 脚本、静态测试和 CI 检查；随后已完成本节 `Accepted` 记录的真实运行验收。
@@ -38,14 +41,14 @@
 
 ### Changed
 
-- Phase 1D-D 状态更新为 `accepted`；Phase 1D-E 状态设为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。Phase 1D-E 决定只记录审计，不 approve/merge GitHub 或部署 Production。
+- Phase 1D-D 和 Phase 1D-E 状态更新为 `accepted`；Phase 1D-F 为 `implemented_pending_verification`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。Phase 1D-E 决定只记录审计，不 approve/merge GitHub 或部署 Production。
 - Phase 1D-D 实现阶段曾设为 `implemented_pending_verification` 并要求首次部署单独批准；该批准与运行验收现已完成，当前状态以上方最新条目为准。
 - Phase 1D-A、Phase 1D-B 和 Phase 1D-C 为 `accepted`；Phase 1D 保持 `in_progress`，Phase 2A 保持 `not_started`。
 - 文档-only Pull Request 同样受 required `CI / Quality Gate` 治理；PR #8 最新 synchronize event 已自动触发并通过全部五个 CI job。
 
 ### Known issues
 
-- Phase 1D-E 主动发消息权限、Production `0002` migration、Worker rollout 及真实允许/拒绝/未授权/重复/过期审批尚未验收；不得标记为 `accepted` 或进入 Phase 1D-F。
+- Phase 1D-F 的 0003、same-digest Staging→Production 和独立 rollback 尚未完成真实 runtime acceptance；不得标记 Phase 1D-F 或 Phase 1D 为 `accepted`，也不得进入 Phase 2A。
 - Ruff formatter 精确排除 4 个既有格式文件，避免 Phase 1D-B 扩大为业务代码批量格式化；这些文件仍接受 compile 和 lint。
 - 当前单 PR CI 范围尚未加入独立 API 测试、secret scanning 或破坏性 migration 自动扫描，对应审计项不得标记为 `configured`。
 

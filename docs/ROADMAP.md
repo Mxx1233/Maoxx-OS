@@ -27,7 +27,7 @@
 - 目标：建立 GitHub 开发治理、自动化 CI、Codex Cloud 非生产协作、隔离 Staging、飞书监督审批和受控生产部署闭环。
 - 数据库表：不新增业务表；审批审计或运维状态若需持久化，必须单独设计评审。
 - 明确不包括：阶段 2 表、媒体下载、OCR、模型网关和领域业务功能。
-- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A、Phase 1D-B、Phase 1D-C 和 Phase 1D-D 为 `accepted`；Phase 1D-E 为 `implemented_pending_verification`，不得进入 Phase 1D-F 或 Phase 2A。
+- 当前状态：`in_progress`；Phase 1D-0 已完成，Phase 1D-A 至 Phase 1D-E 为 `accepted`；Phase 1D-F 为 `implemented_pending_verification`，不得进入 Phase 2A。
 
 ### Phase 1D-0：Server Observability and Execution Foundation
 
@@ -59,12 +59,14 @@
 ### Phase 1D-E：Feishu Supervision and Approval
 
 - 目标：通过飞书查看任务/计划/CI/PR/Staging，批准或退回计划、合并和 Production 部署，并具备身份校验、防重复审批和审计记录。
-- 当前状态：`implemented_pending_verification`；已实现固定状态通知、本地只读 GitHub 验证 CLI、严格文字审批命令、独立审批人 allowlist、时限/幂等/并发事务和 append-only 审计模型。未执行 Production migration、未部署 Worker 新版本，也未验证真实主动消息权限。
+- 当前状态：`accepted`；Production 已在 0002，interactive card 的批准、拒绝、两次等一下、重复、过期和 append-only 路径完成真实/受控 runtime acceptance。无第二个真实 Feishu 身份可用于 unauthorized-human 点击，该路径保留为已声明外部限制并有自动化证据。
 - 详细边界：[Phase 1D-E Supervision](PHASE_1D_E_SUPERVISION.md)。
 
 ### Phase 1D-F：Controlled Deployment
 
 - 目标：main 合并后部署 Staging，Production 独立审批，部署前备份和 migration 风险检查，Git SHA/镜像绑定、健康检查、失败回滚和飞书通知。
+- 当前状态：`implemented_pending_verification`；不可变 intent/artifact、同 digest Staging/Production 绑定、一次性审批消费、separation of duty、资源/备份/migration gates、租约锁、执行/reconciliation、独立 rollback 与 append-only audit 已实现并等待 PR/CI/评审和真实受控演练。
+- 详细边界：[Phase 1D-F Controlled Deployment](PHASE_1D_F_CONTROLLED_DEPLOYMENT.md)。
 
 完整缺口、实施顺序和验收标准见 `docs/PHASE_1D_CONTROL_PLANE.md`。
 

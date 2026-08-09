@@ -44,6 +44,7 @@ def _approval_details(notification: SupervisionNotification) -> str:
         "development_plan": "开发计划确认",
         "merge_pr": "合并进入 Staging",
         "production_deploy": "Production 部署授权",
+        "rollback_production": "Production 回滚授权",
     }[notification.action_code]
     lines = [
         f"**动作：** {action_summary}",
@@ -59,6 +60,14 @@ def _approval_details(notification: SupervisionNotification) -> str:
             f"**请求：** {notification.approval_request_id}",
         ]
     )
+    if notification.deployment_id is not None:
+        assert notification.artifact_digest is not None
+        lines.extend(
+            [
+                f"**部署：** {notification.deployment_id}",
+                f"**工件摘要（完整）：** {notification.artifact_digest}",
+            ]
+        )
     return "\n".join(lines)
 
 

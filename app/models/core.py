@@ -2,6 +2,8 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -11,10 +13,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
@@ -62,6 +65,94 @@ class User(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class ExternalIdentity(Base):
+    """Append-only, privacy-safe versioned external-principal mapping."""
+
+    __tablename__ = "external_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "tenant_fingerprint",
+            "subject_fingerprint",
+            "mapping_version",
+            name="uq_external_identities_mapping_version",
+        ),
+        CheckConstraint("mapping_version > 0", name="mapping_version"),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_to > valid_from", name="validity"
+        ),
+        Index(
+            "uq_external_identities_active_subject",
+            "provider",
+            "tenant_fingerprint",
+            "subject_fingerprint",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    tenant_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    subject_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    principal_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.principals.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    mapping_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    audit_event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+
+    principal: Mapped["Principal"] = relationship(
+        "Principal",
+        passive_deletes=True,
+    )
+
+
+class Principal(Base):
+    __tablename__ = "principals"
+    __table_args__ = (
+        CheckConstraint(
+            "principal_type IN ('HUMAN', 'SERVICE', 'EXECUTOR')", name="type"
+        ),
+        CheckConstraint(
+            "(principal_type = 'HUMAN' AND user_id IS NOT NULL) OR "
+            "(principal_type IN ('SERVICE', 'EXECUTOR') AND user_id IS NULL)",
+            name="human_user_binding",
+        ),
+        UniqueConstraint("user_id", name="uq_principals_user_id"),
+        UniqueConstraint("identity_key", name="uq_principals_identity_key"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    principal_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    identity_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -202,7 +293,7 @@ class ApprovalRequest(Base):
     __table_args__ = (
         CheckConstraint(
             "action_code IN ('development_plan', 'merge_pr', "
-            "'production_deploy')",
+            "'production_deploy', 'rollback_production')",
             name="action_code",
         ),
         CheckConstraint(
@@ -227,9 +318,16 @@ class ApprovalRequest(Base):
             "(action_code = 'merge_pr' AND "
             "target_environment = 'staging' AND "
             "pull_request_number IS NOT NULL) OR "
-            "(action_code = 'production_deploy' AND "
+            "(action_code IN ('production_deploy', "
+            "'rollback_production') AND "
             "target_environment = 'production')",
             name="action_target",
+        ),
+        CheckConstraint(
+            "(deployment_id IS NULL AND artifact_digest IS NULL) OR "
+            "(deployment_id IS NOT NULL AND "
+            "artifact_digest ~ '^sha256:[0-9a-f]{64}$')",
+            name="deployment_binding",
         ),
         UniqueConstraint(
             "idempotency_key",
@@ -269,6 +367,15 @@ class ApprovalRequest(Base):
     target_environment: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
+    )
+    deployment_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    artifact_digest: Mapped[str | None] = mapped_column(
+        String(71),
+        nullable=True,
     )
     idempotency_key: Mapped[str] = mapped_column(
         String(200),
@@ -328,6 +435,11 @@ class ApprovalDecision(Base):
         ForeignKey("core.users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    actor_external_identity_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.external_identities.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     approver_identity_fingerprint: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
@@ -340,4 +452,609 @@ class ApprovalDecision(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class DeploymentIntent(Base):
+    __tablename__ = "deployment_intents"
+    __table_args__ = (
+        CheckConstraint(
+            "intent_kind IN ('deploy', 'rollback')",
+            name="intent_kind",
+        ),
+        CheckConstraint(
+            "action_code IN ('production_deploy', 'rollback_production')",
+            name="action_code",
+        ),
+        CheckConstraint(
+            "(intent_kind = 'deploy' AND action_code = 'production_deploy') "
+            "OR (intent_kind = 'rollback' AND "
+            "action_code = 'rollback_production')",
+            name="kind_action",
+        ),
+        CheckConstraint(
+            "target_environment = 'production'",
+            name="environment",
+        ),
+        CheckConstraint(
+            "target_sha ~ '^[0-9a-f]{40}$'",
+            name="target_sha",
+        ),
+        CheckConstraint(
+            "artifact_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="artifact_digest",
+        ),
+        CheckConstraint(
+            "requested_by_identity_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="requester_fingerprint",
+        ),
+        CheckConstraint(
+            "config_fingerprint ~ '^sha256:[0-9a-f]{64}$'",
+            name="config_fingerprint",
+        ),
+        CheckConstraint(
+            "migration_risk IN ('NONE', 'LOW', 'MEDIUM', 'HIGH')",
+            name="migration_risk",
+        ),
+        CheckConstraint(
+            "migration_risk <> 'MEDIUM' OR "
+            "(migration_revision IS NOT NULL AND "
+            "rollback_runbook_ref IS NOT NULL)",
+            name="medium_migration_evidence",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_deployment_intents_idempotency_key",
+        ),
+        Index(
+            "ix_deployment_intents_target",
+            "repository",
+            "target_sha",
+            "created_at",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    requester_principal_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.principals.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    requester_external_identity_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.external_identities.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    intent_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    action_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_environment: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    artifact_digest: Mapped[str] = mapped_column(
+        String(71),
+        nullable=False,
+    )
+    requested_by_identity_fingerprint: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    service_set: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    migration_risk: Mapped[str] = mapped_column(String(16), nullable=False)
+    migration_revision: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
+    rollback_runbook_ref: Mapped[str | None] = mapped_column(
+        String(300),
+        nullable=True,
+    )
+    config_fingerprint: Mapped[str] = mapped_column(
+        String(71),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    requester_principal: Mapped["Principal"] = relationship(
+        "Principal",
+        passive_deletes=True,
+    )
+    requester_external_identity: Mapped["ExternalIdentity"] = relationship(
+        "ExternalIdentity",
+        passive_deletes=True,
+    )
+    requester_user: Mapped["User"] = relationship(
+        "User",
+        passive_deletes=True,
+    )
+
+
+class DeploymentArtifact(Base):
+    __tablename__ = "deployment_artifacts"
+    __table_args__ = (
+        CheckConstraint(
+            "digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="digest",
+        ),
+        CheckConstraint(
+            "target_sha ~ '^[0-9a-f]{40}$' AND ci_head_sha ~ '^[0-9a-f]{40}$'",
+            name="sha",
+        ),
+        CheckConstraint("ci_run_id > 0", name="ci_run_id"),
+        CheckConstraint("ci_event = 'push'", name="ci_event"),
+        CheckConstraint("ci_status = 'completed'", name="ci_status"),
+        CheckConstraint("ci_conclusion = 'success'", name="ci_conclusion"),
+        CheckConstraint(
+            "quality_gate_conclusion = 'success'",
+            name="quality_gate",
+        ),
+        CheckConstraint(
+            "ci_provenance_source = 'github_checks_api'",
+            name="ci_provenance_source",
+        ),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_artifacts_deployment_id",
+        ),
+        Index("ix_deployment_artifacts_digest", "digest"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    image_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    service_images: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    ci_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    ci_event: Mapped[str] = mapped_column(String(32), nullable=False)
+    ci_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    ci_conclusion: Mapped[str] = mapped_column(String(32), nullable=False)
+    ci_head_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    quality_gate_conclusion: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    protected_main_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+    ci_workflow_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    ci_repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    ci_verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    ci_provenance_source: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    provenance: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class DeploymentStateEvent(Base):
+    __tablename__ = "deployment_state_events"
+    __table_args__ = (
+        CheckConstraint("sequence > 0", name="sequence"),
+        CheckConstraint(
+            "actor_identity_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="actor_fingerprint",
+        ),
+        UniqueConstraint(
+            "deployment_id",
+            "sequence",
+            name="uq_deployment_state_events_sequence",
+        ),
+        Index(
+            "ix_deployment_state_events_deployment_occurred",
+            "deployment_id",
+            "occurred_at",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    from_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_identity_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class StagingAcceptance(Base):
+    __tablename__ = "staging_acceptances"
+    __table_args__ = (
+        CheckConstraint("environment = 'staging'", name="environment"),
+        CheckConstraint(
+            "target_sha ~ '^[0-9a-f]{40}$'",
+            name="target_sha",
+        ),
+        CheckConstraint(
+            "artifact_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="artifact_digest",
+        ),
+        CheckConstraint(
+            "accepted_by_identity_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="actor_fingerprint",
+        ),
+        CheckConstraint(
+            "config_fingerprint ~ '^sha256:[0-9a-f]{64}$'",
+            name="config_fingerprint",
+        ),
+        CheckConstraint("valid_until > completed_at", name="validity"),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_staging_acceptances_deployment_id",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    artifact_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    environment: Mapped[str] = mapped_column(String(32), nullable=False)
+    validation_suite_version: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
+    config_fingerprint: Mapped[str] = mapped_column(String(71), nullable=False)
+    accepted_by_identity_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    valid_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class StagingAcceptanceInvalidation(Base):
+    __tablename__ = "staging_acceptance_invalidations"
+    __table_args__ = (
+        UniqueConstraint(
+            "acceptance_id",
+            name="uq_staging_acceptance_invalidations_acceptance_id",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    acceptance_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.staging_acceptances.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    invalidated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DeploymentApprovalBinding(Base):
+    __tablename__ = "deployment_approval_bindings"
+    __table_args__ = (
+        CheckConstraint(
+            "target_sha ~ '^[0-9a-f]{40}$'",
+            name="target_sha",
+        ),
+        CheckConstraint(
+            "artifact_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="artifact_digest",
+        ),
+        CheckConstraint(
+            "requester_identity_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="requester_fingerprint",
+        ),
+        CheckConstraint(
+            "target_environment = 'production'",
+            name="environment",
+        ),
+        CheckConstraint(
+            "action_code IN ('production_deploy', 'rollback_production')",
+            name="action_code",
+        ),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_approval_bindings_deployment_id",
+        ),
+        UniqueConstraint(
+            "approval_request_id",
+            name="uq_deployment_approval_bindings_request_id",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    approval_request_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.approval_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    repository: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_environment: Mapped[str] = mapped_column(String(32), nullable=False)
+    action_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    artifact_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    requester_identity_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    requester_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    bound_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DeploymentApprovalConsumption(Base):
+    __tablename__ = "deployment_approval_consumptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_approval_consumptions_deployment_id",
+        ),
+        UniqueConstraint(
+            "approval_request_id",
+            name="uq_deployment_approval_consumptions_request_id",
+        ),
+        UniqueConstraint(
+            "approval_decision_id",
+            name="uq_deployment_approval_consumptions_decision_id",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    approval_request_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.approval_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    approval_decision_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.approval_decisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    state_event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_state_events.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    consumed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class DeploymentLock(Base):
+    __tablename__ = "deployment_locks"
+    __table_args__ = (
+        CheckConstraint(
+            "environment = 'production'",
+            name="environment",
+        ),
+        CheckConstraint(
+            "lease_expires_at > acquired_at",
+            name="lease",
+        ),
+        CheckConstraint(
+            "conflict_domain = 'production:global'",
+            name="canonical_conflict_domain",
+        ),
+        CheckConstraint("fencing_token > 0", name="fencing_token"),
+        {"schema": "core"},
+    )
+
+    conflict_domain: Mapped[str] = mapped_column(String(100), primary_key=True)
+    environment: Mapped[str] = mapped_column(String(32), nullable=False)
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    owner_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    renewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    lease_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    stale_reconciled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stale_reconciled_token: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    stale_reconciliation_evidence_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+
+
+class DeploymentExecutionAttempt(Base):
+    __tablename__ = "deployment_execution_attempts"
+    __table_args__ = (
+        CheckConstraint("fencing_token > 0", name="fencing_token"),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_execution_attempts_deployment_id",
+        ),
+        UniqueConstraint(
+            "execution_key",
+            name="uq_deployment_execution_attempts_execution_key",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    execution_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    executor_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    intent_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DeploymentEvidence(Base):
+    __tablename__ = "deployment_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "status_code IN ('pending', 'passed', 'failed', 'recorded')",
+            name="status_code",
+        ),
+        UniqueConstraint(
+            "deployment_id",
+            "evidence_type",
+            "evidence_key",
+            name="uq_deployment_evidence_identity",
+        ),
+        Index(
+            "ix_deployment_evidence_deployment_occurred",
+            "deployment_id",
+            "occurred_at",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    evidence_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    status_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DeploymentRollback(Base):
+    __tablename__ = "deployment_rollbacks"
+    __table_args__ = (
+        CheckConstraint(
+            "current_production_sha ~ '^[0-9a-f]{40}$' AND "
+            "rollback_target_sha ~ '^[0-9a-f]{40}$'",
+            name="sha",
+        ),
+        CheckConstraint(
+            "rollback_artifact_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="artifact_digest",
+        ),
+        UniqueConstraint(
+            "deployment_id",
+            name="uq_deployment_rollbacks_deployment_id",
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    failed_deployment_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.deployment_intents.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    current_production_sha: Mapped[str] = mapped_column(
+        String(40), nullable=False
+    )
+    rollback_target_sha: Mapped[str] = mapped_column(
+        String(40), nullable=False
+    )
+    rollback_artifact_digest: Mapped[str] = mapped_column(
+        String(71), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
