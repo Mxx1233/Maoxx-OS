@@ -153,12 +153,18 @@ class Runtime:
         self.assert_attempt(item)
         return RuntimeSnapshot(
             self.state,
-            item.deployment_id if self.state != RuntimeState.NOT_STARTED else None,
+            item.deployment_id
+            if self.state != RuntimeState.NOT_STARTED
+            else None,
             item.execution_attempt_id
             if self.state != RuntimeState.NOT_STARTED
             else None,
-            item.fencing_epoch if self.state != RuntimeState.NOT_STARTED else None,
-            item.intent_hash if self.state != RuntimeState.NOT_STARTED else None,
+            item.fencing_epoch
+            if self.state != RuntimeState.NOT_STARTED
+            else None,
+            item.intent_hash
+            if self.state != RuntimeState.NOT_STARTED
+            else None,
             {},
             "cursor",
             self.client_active,
@@ -171,9 +177,7 @@ class Runtime:
 
     def verify_health(self, item, *, deadline):
         self.assert_attempt(item)
-        checks = {
-            name: True for name in required_health_checks(("api",))
-        }
+        checks = {name: True for name in required_health_checks(("api",))}
         self.state = RuntimeState.HEALTHY
         return HealthCycle(
             checks,
@@ -340,9 +344,7 @@ class ProductionSupervisorTests(unittest.TestCase):
     def test_journal_missing_after_db_submission_fails_closed(self) -> None:
         # Simulate a crash after the DB marker was persisted but before the
         # journal file survived: a fresh supervisor must refuse to mutate.
-        self.authority.mutation_markers.append(
-            self.item.execution_attempt_id
-        )
+        self.authority.mutation_markers.append(self.item.execution_attempt_id)
         with self.assertRaises(SupervisorError) as blocked:
             self.supervisor.execute(self.item.execution_attempt_id)
         self.assertEqual(

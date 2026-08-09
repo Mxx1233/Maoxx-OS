@@ -125,7 +125,9 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
             database.refresh(intent)
             return intent
 
-    def test_external_identity_is_unique_versioned_and_historical(self) -> None:
+    def test_external_identity_is_unique_versioned_and_historical(
+        self,
+    ) -> None:
         _, principal_id, mapping_id, tenant, subject = (
             self._principal_and_mapping()
         )
@@ -165,9 +167,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
             database.rollback()
 
     def test_evidence_status_contract_and_pending_gate_semantics(self) -> None:
-        user_id, principal_id, mapping_id, _, _ = (
-            self._principal_and_mapping()
-        )
+        user_id, principal_id, mapping_id, _, _ = self._principal_and_mapping()
         intent = self._intent(user_id, principal_id, mapping_id)
         with self.sessions() as database:
             for status in ("pending", "passed", "failed", "recorded"):
@@ -209,9 +209,7 @@ class DeploymentDatabaseIntegrationTests(unittest.TestCase):
             self.assertEqual(passed, 1)
 
     def test_append_only_evidence_rejects_update_and_delete(self) -> None:
-        user_id, principal_id, mapping_id, _, _ = (
-            self._principal_and_mapping()
-        )
+        user_id, principal_id, mapping_id, _, _ = self._principal_and_mapping()
         intent = self._intent(user_id, principal_id, mapping_id)
         with self.sessions() as database:
             evidence = DeploymentEvidence(

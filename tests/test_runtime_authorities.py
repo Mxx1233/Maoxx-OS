@@ -45,7 +45,9 @@ class CommandFixture:
             code, payload = 0, response
         return SimpleNamespace(
             returncode=code,
-            stdout=payload if isinstance(payload, str) else json.dumps(payload),
+            stdout=payload
+            if isinstance(payload, str)
+            else json.dumps(payload),
             stderr="",
         )
 
@@ -163,7 +165,9 @@ class GitHubAuthorityTests(unittest.TestCase):
                         run_id=123,
                     )
 
-    def test_wrong_repository_sha_event_and_ambiguous_quality_fail_closed(self):
+    def test_wrong_repository_sha_event_and_ambiguous_quality_fail_closed(
+        self,
+    ):
         with self.assertRaises(ValueError):
             self.verifier(github_fixture()).verify(
                 repository="Other/Repo", target_sha=SHA, run_id=123
@@ -240,7 +244,10 @@ class ResourceAuthorityTests(unittest.TestCase):
         result = collector._evaluate(self.samples())
         with self.assertRaises(ResourceAuthorityError):
             result.require_fresh(result.evaluated_at + timedelta(seconds=31))
-        self.assertNotIn("passed", TrustedProductionResourceCollector.collect.__annotations__)
+        self.assertNotIn(
+            "passed",
+            TrustedProductionResourceCollector.collect.__annotations__,
+        )
 
 
 class ImmutableRuntimeTests(unittest.TestCase):
@@ -270,15 +277,15 @@ class ImmutableRuntimeTests(unittest.TestCase):
             )
             with self.assertRaises(SupervisorError) as build:
                 runtime.validate_plan(item)
-            self.assertEqual(build.exception.code, "resolved_plan_not_immutable")
+            self.assertEqual(
+                build.exception.code, "resolved_plan_not_immutable"
+            )
 
             for image in (
                 "registry.example/maoxx:latest",
                 "registry.example/maoxx@sha256:" + "c" * 64,
             ):
-                forged = SupervisorAttempt(
-                    *item.__dict__.values()
-                )
+                forged = SupervisorAttempt(*item.__dict__.values())
                 object.__setattr__(forged, "service_images", {"api": image})
                 with self.assertRaises(SupervisorError):
                     runtime.validate_plan(forged)
@@ -320,15 +327,15 @@ def worker_attempt() -> SupervisorAttempt:
         artifact_digest=DIGEST,
         expected_migration_revision=item.expected_migration_revision,
     )
-    forged = SupervisorAttempt(
-        *item.__dict__.values()
-    )
+    forged = SupervisorAttempt(*item.__dict__.values())
     object.__setattr__(forged, "service_images", images)
     object.__setattr__(forged, "intent_hash", intent_hash)
     return forged
 
 
-def healthy_container(item: SupervisorAttempt, service: str, container_id: str) -> dict:
+def healthy_container(
+    item: SupervisorAttempt, service: str, container_id: str
+) -> dict:
     labels = {
         "com.maoxx.deployment_id": str(item.deployment_id),
         "com.maoxx.execution_attempt_id": str(item.execution_attempt_id),
@@ -372,13 +379,19 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
 
         def run(argv, **_kwargs):
             calls.append(argv)
-            if argv[:4] == ["docker", "compose", "-f", str(compose)] and argv[4:6] == ["ps", "--format"]:
+            if argv[:4] == ["docker", "compose", "-f", str(compose)] and argv[
+                4:6
+            ] == ["ps", "--format"]:
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(
                         [
                             {"Service": "api", "ID": "c1", "State": "running"},
-                            {"Service": "feishu-worker", "ID": "c2", "State": "running"},
+                            {
+                                "Service": "feishu-worker",
+                                "ID": "c2",
+                                "State": "running",
+                            },
                         ]
                     ),
                     stderr="",
@@ -387,7 +400,9 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
                 service = "api" if argv[2] == "c1" else "feishu-worker"
                 return SimpleNamespace(
                     returncode=0,
-                    stdout=json.dumps([healthy_container(item, service, argv[2])]),
+                    stdout=json.dumps(
+                        [healthy_container(item, service, argv[2])]
+                    ),
                     stderr="",
                 )
             if argv[:3] == ["docker", "image", "inspect"]:
@@ -403,13 +418,27 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
                     ),
                     stderr="",
                 )
-            if argv[:6] == ["docker", "compose", "-f", str(compose), "exec", "-T"] and argv[6] == "api":
+            if (
+                argv[:6]
+                == ["docker", "compose", "-f", str(compose), "exec", "-T"]
+                and argv[6] == "api"
+            ):
                 return SimpleNamespace(
-                    returncode=0, stdout="0003_phase_1d_f_deployment", stderr=""
+                    returncode=0,
+                    stdout="0003_phase_1d_f_deployment",
+                    stderr="",
                 )
-            if argv[:6] == ["docker", "compose", "-f", str(compose), "exec", "-T"] and argv[6] == "feishu-worker":
-                return worker_responses.pop(0) if worker_responses else SimpleNamespace(
-                    returncode=1, stdout="", stderr="worker probe failed"
+            if (
+                argv[:6]
+                == ["docker", "compose", "-f", str(compose), "exec", "-T"]
+                and argv[6] == "feishu-worker"
+            ):
+                return (
+                    worker_responses.pop(0)
+                    if worker_responses
+                    else SimpleNamespace(
+                        returncode=1, stdout="", stderr="worker probe failed"
+                    )
                 )
             if argv[0] == "curl":
                 return SimpleNamespace(returncode=0, stdout="ok", stderr="")
@@ -418,7 +447,9 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
             raise AssertionError(f"unexpected argv: {argv}")
 
         runtime = DockerComposeSupervisorRuntime(
-            compose_file=compose, run=run, sleep=sleep or (lambda _seconds: None)
+            compose_file=compose,
+            run=run,
+            sleep=sleep or (lambda _seconds: None),
         )
         return runtime, calls
 
@@ -431,13 +462,14 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
         deadline = datetime.now(UTC) + timedelta(seconds=3)
         with self.assertRaises(SupervisorError) as failed:
             runtime.verify_health(item, deadline=deadline)
-        self.assertEqual(failed.exception.code, "mandatory_health_check_failed")
+        self.assertEqual(
+            failed.exception.code, "mandatory_health_check_failed"
+        )
         # The worker probe must run inside the container on 8081 — never a
         # bare host curl to a non-published port.
         self.assertTrue(
             any(
-                "8081" in " ".join(argv)
-                and argv[6] == "feishu-worker"
+                "8081" in " ".join(argv) and argv[6] == "feishu-worker"
                 for argv in calls
                 if "feishu-worker" in argv
             )
@@ -451,7 +483,9 @@ class WorkerHealthRuntimeTests(unittest.TestCase):
         runtime, calls = self._runtime(
             item,
             [
-                SimpleNamespace(returncode=1, stdout="", stderr="not ready yet"),
+                SimpleNamespace(
+                    returncode=1, stdout="", stderr="not ready yet"
+                ),
                 SimpleNamespace(
                     returncode=0, stdout='{"connected": true}', stderr=""
                 ),

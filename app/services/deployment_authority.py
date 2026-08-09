@@ -289,4 +289,3 @@ class GitHubCliProtectedMainCiVerifier:
                 "quality_gate_job_id": str(quality[0].get("id")),
             },
         )
-
