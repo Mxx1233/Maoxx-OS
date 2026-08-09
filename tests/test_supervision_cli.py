@@ -14,6 +14,7 @@ from app.supervision_cli import (
     run,
     verify_github_state,
 )
+from app.services.feishu_delivery import DeliveryResult
 from app.services.supervision_notifications import SupervisionNotification
 
 
@@ -284,7 +285,7 @@ class SupervisionCliTests(unittest.TestCase):
 
         def send(_notification):
             events.append("sent")
-            return True
+            return DeliveryResult(sent=True, attempts=1)
 
         with (
             patch("app.supervision_cli.SessionLocal", session_local),
@@ -296,6 +297,98 @@ class SupervisionCliTests(unittest.TestCase):
         ):
             self.assertEqual(run(args), 0)
         self.assertEqual(events, ["persisted", "sent"])
+
+    def test_approval_message_id_persisted_after_send(self) -> None:
+        # H-8: after a successful card send the platform message id must be
+        # persisted on the approval request so the card can be rebuilt from
+        # the authoritative database instead of chat history.
+        request_id = UUID("22222222-2222-4222-8222-222222222222")
+        request = SimpleNamespace(
+            id=request_id,
+            repository="Mxx1233/Maoxx-OS",
+            target_sha=SHA,
+            pull_request_number=14,
+            target_environment="production",
+            action_code="production_deploy",
+            expires_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
+        )
+        args = SimpleNamespace(
+            command="request-approval",
+            action="production_deploy",
+            repository="Mxx1233/Maoxx-OS",
+            sha=SHA,
+            pr_number=14,
+            environment="production",
+            idempotency_key="deploy-14-b",
+            verify_github=False,
+        )
+        persisted = SimpleNamespace(card_message_id=None)
+        session = MagicMock()
+
+        def session_context():
+            session.get.return_value = persisted
+            return session
+
+        session_local = MagicMock()
+        session_local.return_value.__enter__.side_effect = session_context
+        session_local.return_value.__exit__.return_value = False
+
+        with (
+            patch("app.supervision_cli.SessionLocal", session_local),
+            patch(
+                "app.supervision_cli.create_approval_request",
+                return_value=request,
+            ),
+            patch(
+                "app.supervision_cli._send",
+                return_value=DeliveryResult(
+                    sent=True, attempts=1, message_id="om_persisted_card"
+                ),
+            ),
+        ):
+            self.assertEqual(run(args), 0)
+        self.assertEqual(persisted.card_message_id, "om_persisted_card")
+        session.commit.assert_called_once()
+
+    def test_approval_message_id_not_persisted_when_send_failed(self) -> None:
+        request_id = UUID("33333333-3333-4333-8333-333333333333")
+        request = SimpleNamespace(
+            id=request_id,
+            repository="Mxx1233/Maoxx-OS",
+            target_sha=SHA,
+            pull_request_number=14,
+            target_environment="production",
+            action_code="production_deploy",
+            expires_at=datetime(2026, 8, 7, 12, tzinfo=UTC),
+        )
+        args = SimpleNamespace(
+            command="request-approval",
+            action="production_deploy",
+            repository="Mxx1233/Maoxx-OS",
+            sha=SHA,
+            pr_number=14,
+            environment="production",
+            idempotency_key="deploy-14-c",
+            verify_github=False,
+        )
+        session_local = MagicMock()
+
+        with (
+            patch("app.supervision_cli.SessionLocal", session_local),
+            patch(
+                "app.supervision_cli.create_approval_request",
+                return_value=request,
+            ),
+            patch(
+                "app.supervision_cli._send",
+                return_value=DeliveryResult(
+                    sent=False, attempts=3, failure_reason="permanent_error"
+                ),
+            ),
+        ):
+            self.assertEqual(run(args), 1)
+        session_local.assert_called_once()  # only the create session
+        session_local.return_value.__enter__.return_value.commit.assert_not_called()
 
     def test_approval_notification_uses_interactive_card_as_primary(
         self,

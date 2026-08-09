@@ -109,6 +109,30 @@ class RuntimeSnapshot:
     observed_at: datetime
 
     def stable_fingerprint(self) -> str:
+        # Only fields that are stable across a quiescence window participate
+        # in the fingerprint. Docker's Health.Log mutates on every health
+        # probe and would otherwise defeat a 10s takeover proof.
+        stable_containers = {
+            service: {
+                "running": detail.get("State", {}).get("Running"),
+                "status": detail.get("State", {}).get("Status"),
+                "exit_code": detail.get("State", {}).get("ExitCode"),
+                "oom_killed": detail.get("State", {}).get("OOMKilled"),
+                "restart_count": detail.get("RestartCount"),
+                "health_status": detail.get("State", {})
+                .get("Health", {})
+                .get("Status"),
+                "image": detail.get("Config", {}).get("Image"),
+                "labels": {
+                    key: value
+                    for key, value in detail.get("Config", {})
+                    .get("Labels", {})
+                    .items()
+                    if key.startswith("com.maoxx.")
+                },
+            }
+            for service, detail in self.containers.items()
+        }
         canonical = json.dumps(
             {
                 "state": self.state.value,
@@ -116,7 +140,7 @@ class RuntimeSnapshot:
                 "execution_attempt_id": str(self.execution_attempt_id),
                 "fencing_epoch": self.fencing_epoch,
                 "intent_hash": self.intent_hash,
-                "containers": self.containers,
+                "containers": stable_containers,
                 "transitional": self.transitional,
             },
             sort_keys=True,
@@ -681,6 +705,7 @@ class ProductionDeploymentSupervisor:
                     RuntimeState.HEALTHY,
                     RuntimeState.FAILED,
                     RuntimeState.NOT_STARTED,
+                    RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN,
                 }
             )
             journal.append(
@@ -724,9 +749,39 @@ class ProductionDeploymentSupervisor:
         self, attempt: SupervisorAttempt, journal: DurableExecutionJournal
     ) -> RuntimeState:
         journal.append(JournalEvent.HEALTH_STARTED, attempt)
-        deadline = datetime.now(UTC) + timedelta(
-            seconds=HEALTH_DEADLINE_SECONDS
-        )
+        # The global 120s health window is anchored to the earliest durable
+        # evidence of the mutation being complete: prefer the journaled
+        # MUTATION_COMPLETED timestamp; when the submit acknowledgement was
+        # lost (no MUTATION_COMPLETED record, runtime observed MCHU) fall
+        # back to the first HEALTH_STARTED so repeated supervisor restarts
+        # cannot extend the window. Journal records were already validated
+        # on load (binding + ISO timestamp), so fromisoformat is safe here.
+        records = journal.load(attempt)
+        anchors = [
+            row["timestamp"]
+            for row in records
+            if row["event"]
+            in {
+                JournalEvent.MUTATION_COMPLETED.value,
+                JournalEvent.HEALTH_STARTED.value,
+            }
+        ]
+        if not anchors:
+            journal.append(
+                JournalEvent.HEALTH_FAILED,
+                attempt,
+                {"error_type": "health_window_anchor_missing"},
+            )
+            journal.append(
+                JournalEvent.ATTEMPT_TERMINAL,
+                attempt,
+                {"state": RuntimeState.FAILED.value},
+            )
+            return self._record_result_or_unknown(
+                attempt, journal, RuntimeState.FAILED, "health"
+            )
+        completed_at = datetime.fromisoformat(anchors[0])
+        deadline = completed_at + timedelta(seconds=HEALTH_DEADLINE_SECONDS)
         try:
             cycle = self._runtime.verify_health(attempt, deadline=deadline)
             required = required_health_checks(
@@ -995,10 +1050,18 @@ class DockerComposeSupervisorRuntime:
             attempt.intent_hash,
         )
         binding_valid = bindings == {expected_binding}
+        if not selected:
+            state = RuntimeState.NOT_STARTED
+        elif transitional:
+            state = RuntimeState.UNKNOWN
+        elif not binding_valid:
+            state = RuntimeState.UNKNOWN
+        elif not running:
+            state = RuntimeState.FAILED
+        else:
+            state = RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN
         return RuntimeSnapshot(
-            RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN
-            if running and binding_valid
-            else RuntimeState.UNKNOWN,
+            state,
             attempt.deployment_id if binding_valid else None,
             attempt.execution_attempt_id if binding_valid else None,
             attempt.fencing_epoch if binding_valid else None,

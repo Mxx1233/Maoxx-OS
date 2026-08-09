@@ -1,8 +1,9 @@
+import copy
 import json
 import tempfile
 import threading
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -244,6 +245,57 @@ class ProductionSupervisorTests(unittest.TestCase):
         self.assertEqual(state, RuntimeState.HEALTHY)
         self.assertEqual(self.runtime.submissions, 0)
 
+    def test_health_window_not_restarted_after_crash(self) -> None:
+        # H-5 regression: a supervisor recovering after a crash must anchor
+        # the 120s health window to the durable MUTATION_COMPLETED journal
+        # timestamp. Simulate a crash 10 minutes after mutation completed:
+        # the window has long expired, so recovery must fail closed instead
+        # of being granted a fresh 120s.
+        root = Path(self.temporary.name)
+        journal_path = (
+            root / "journal" / f"{self.item.execution_attempt_id}.jsonl"
+        )
+        journal_path.parent.mkdir(mode=0o700, parents=True)
+        stale = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+        records = [
+            {
+                "event": JournalEvent.ATTEMPT_ACCEPTED.value,
+                "deployment_id": str(self.item.deployment_id),
+                "execution_attempt_id": str(self.item.execution_attempt_id),
+                "fencing_epoch": self.item.fencing_epoch,
+                "intent_hash": self.item.intent_hash,
+                "timestamp": stale,
+                "outcome": {},
+            },
+            {
+                "event": JournalEvent.MUTATION_SUBMITTED.value,
+                "deployment_id": str(self.item.deployment_id),
+                "execution_attempt_id": str(self.item.execution_attempt_id),
+                "fencing_epoch": self.item.fencing_epoch,
+                "intent_hash": self.item.intent_hash,
+                "timestamp": stale,
+                "outcome": {},
+            },
+            {
+                "event": JournalEvent.MUTATION_COMPLETED.value,
+                "deployment_id": str(self.item.deployment_id),
+                "execution_attempt_id": str(self.item.execution_attempt_id),
+                "fencing_epoch": self.item.fencing_epoch,
+                "intent_hash": self.item.intent_hash,
+                "timestamp": stale,
+                "outcome": {},
+            },
+        ]
+        journal_path.write_text(
+            "\n".join(json.dumps(row, sort_keys=True) for row in records)
+            + "\n"
+        )
+        self.authority.mutation_markers.append(self.item.execution_attempt_id)
+        self.runtime.state = RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN
+        state = self.supervisor.execute(self.item.execution_attempt_id)
+        self.assertEqual(state, RuntimeState.FAILED)
+        self.assertEqual(self.runtime.submissions, 0)
+
     def test_unknown_and_db_disconnect_fail_closed(self) -> None:
         journal = DurableExecutionJournal(
             Path(self.temporary.name) / "journal",
@@ -294,6 +346,74 @@ class ProductionSupervisorTests(unittest.TestCase):
             self.supervisor.prove_quiescent_takeover(
                 self.item.execution_attempt_id
             )
+        )
+
+    def test_takeover_allows_mutation_completed_health_unknown(self) -> None:
+        # H-4 regression: the production observer only ever emits MCHU (or
+        # UNKNOWN), so takeover must accept MCHU — otherwise
+        # prove_quiescent_takeover is dead code in production and stale
+        # leases can never be recovered. MCHU takeover is safe: the
+        # successor only runs health verification, never a second mutation.
+        self.runtime.state = RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN
+        self.assertTrue(
+            self.supervisor.prove_quiescent_takeover(
+                self.item.execution_attempt_id
+            )
+        )
+
+    def test_stable_fingerprint_ignores_health_log(self) -> None:
+        # H-4: Docker's Health.Log mutates on every probe. If it
+        # participated in the fingerprint, two observations 10s apart would
+        # never match and quiescent takeover could never succeed.
+        base = {
+            "State": {
+                "Running": True,
+                "Status": "running",
+                "ExitCode": 0,
+                "OOMKilled": False,
+                "Health": {
+                    "Status": "healthy",
+                    "Log": [{"ExitCode": 0, "Output": "ok"}],
+                },
+            },
+            "RestartCount": 0,
+            "Config": {
+                "Image": "registry.example/maoxx@sha256:aaaa",
+                "Labels": {
+                    "com.maoxx.deployment_id": str(self.item.deployment_id)
+                },
+            },
+        }
+        mutated = copy.deepcopy(base)
+        mutated["State"]["Health"]["Log"].append(
+            {"ExitCode": 0, "Output": "ok", "Start": "2026-01-01T00:00:00Z"}
+        )
+        first = RuntimeSnapshot(
+            RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN,
+            self.item.deployment_id,
+            self.item.execution_attempt_id,
+            self.item.fencing_epoch,
+            self.item.intent_hash,
+            {"api": base},
+            "cursor",
+            False,
+            False,
+            datetime.now(UTC),
+        )
+        second = RuntimeSnapshot(
+            RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN,
+            self.item.deployment_id,
+            self.item.execution_attempt_id,
+            self.item.fencing_epoch,
+            self.item.intent_hash,
+            {"api": mutated},
+            "cursor",
+            False,
+            False,
+            datetime.now(UTC),
+        )
+        self.assertEqual(
+            first.stable_fingerprint(), second.stable_fingerprint()
         )
 
     def test_journal_corruption_and_binding_mismatch_fail_closed(self) -> None:

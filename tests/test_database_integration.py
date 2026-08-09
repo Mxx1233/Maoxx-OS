@@ -495,7 +495,7 @@ class DatabaseIntegrationTests(unittest.TestCase):
 
             self.assertEqual(
                 revision,
-                "0003_phase_1d_f_deployment",
+                "0004_approval_card_message_id",
             )
             self.assertIn("ix_entities_user_type_status", indexes)
             self.assertIn("ix_raw_inputs_user_received", indexes)

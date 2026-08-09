@@ -23,6 +23,35 @@ class FeishuDeliveryTests(unittest.TestCase):
         )
         self.assertTrue(result.sent)
         self.assertEqual(result.attempts, 1)
+        self.assertIsNone(result.message_id)
+
+    def test_success_captures_message_id(self) -> None:
+        # H-8: the caller must be able to persist the platform message id
+        # (CAS card persistence) instead of losing it after send.
+        result = deliver_with_retry(
+            lambda: FakeResponse(True),
+            max_attempts=3,
+            backoff_seconds=1,
+            sleep=lambda _: None,
+            message_id_of=lambda _response: "om_abc123",
+        )
+        self.assertTrue(result.sent)
+        self.assertEqual(result.message_id, "om_abc123")
+
+    def test_message_id_extractor_never_breaks_failure_paths(self) -> None:
+        responses = iter(
+            [FakeResponse(False, 99991400), FakeResponse(False, 400)]
+        )
+        result = deliver_with_retry(
+            lambda: next(responses),
+            max_attempts=3,
+            backoff_seconds=1,
+            sleep=lambda _: None,
+            message_id_of=lambda _response: "om_should_not_appear",
+        )
+        self.assertFalse(result.sent)
+        self.assertEqual(result.failure_reason, "permanent_error")
+        self.assertIsNone(result.message_id)
 
     def test_retries_rate_limit_with_exponential_backoff_and_jitter(self) -> None:
         responses = iter(
