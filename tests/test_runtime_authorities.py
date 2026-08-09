@@ -4,7 +4,6 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 from uuid import uuid4
 
 from app.services.deployment_authority import GitHubCliProtectedMainCiVerifier
