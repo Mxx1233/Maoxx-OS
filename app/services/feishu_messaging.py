@@ -37,6 +37,16 @@ def build_feishu_client(app_id: str, app_secret: str):
     )
 
 
+def _extract_message_id(response: object) -> str | None:
+    data = getattr(response, "data", None)
+    if data is None:
+        return None
+    message_id = getattr(data, "message_id", None)
+    if isinstance(message_id, str) and message_id:
+        return message_id
+    return None
+
+
 def send_structured_text(
     client: FeishuMessageClient,
     *,
@@ -64,6 +74,7 @@ def send_structured_text(
         lambda: client.im.v1.message.create(request),
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
+        message_id_of=_extract_message_id,
     )
     logger.info(
         "event=feishu_supervision_delivery sent=%s attempts=%s reason=%s",
@@ -101,6 +112,7 @@ def send_interactive_card(
         lambda: client.im.v1.message.create(request),
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
+        message_id_of=_extract_message_id,
     )
     logger.info(
         "event=feishu_approval_card_delivery sent=%s attempts=%s reason=%s",

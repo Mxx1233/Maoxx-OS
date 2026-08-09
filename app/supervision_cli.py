@@ -4,17 +4,30 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID, uuid4
 
 from app.config import settings
 from app.db import SessionLocal
+from app.models import ApprovalRequest
 from app.services.approval_service import (
     ApprovalValidationError,
     create_approval_request,
 )
+from app.services.backup_authority import (
+    BackupAuthorityError,
+    ProductionBackupAuthority,
+)
+from app.services.feishu_delivery import DeliveryResult
 from app.services.feishu_messaging import (
     build_feishu_client,
     send_interactive_card,
     send_structured_text,
+)
+from app.services.identity_authority import (
+    IdentityAuthorityError,
+    assign_feishu_identity,
+    provision_principal,
 )
 from app.services.approval_cards import build_approval_card
 from app.services.supervision_notifications import (
@@ -162,7 +175,7 @@ def verify_github_state(evidence: GitHubEvidence) -> None:
             raise GitHubVerificationError("Quality Gate failure not verified")
 
 
-def _send(notification: SupervisionNotification) -> bool:
+def _send(notification: SupervisionNotification) -> DeliveryResult:
     if not settings.approval_configuration_valid:
         raise NotificationValidationError(
             "supervision/approval configuration is incomplete"
@@ -188,7 +201,7 @@ def _send(notification: SupervisionNotification) -> bool:
             text=format_notification(notification),
             **common,
         )
-    return result.sent
+    return result
 
 
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -236,6 +249,38 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("development", "staging", "production"),
     )
     approval.add_argument("--idempotency-key", required=True)
+
+    principal = subparsers.add_parser(
+        "provision-principal", help="Provision a typed principal."
+    )
+    principal.add_argument(
+        "--type",
+        required=True,
+        choices=("HUMAN", "SERVICE", "EXECUTOR"),
+        dest="principal_type",
+    )
+    principal.add_argument("--identity-key", required=True)
+    principal.add_argument("--user-id", type=UUID)
+
+    identity = subparsers.add_parser(
+        "assign-feishu-identity",
+        help="Map a Feishu tenant/open id to a HUMAN principal.",
+    )
+    identity.add_argument("--tenant-id", required=True)
+    identity.add_argument("--open-id", required=True)
+    identity.add_argument("--principal-id", type=UUID, required=True)
+
+    backup = subparsers.add_parser(
+        "create-backup",
+        help="Create and verify a deployment-bound production backup.",
+    )
+    backup.add_argument("--deployment-id", type=UUID, required=True)
+    backup.add_argument(
+        "--backup-root",
+        type=Path,
+        default=Path("/opt/maoxx-os/backups"),
+    )
+    backup.add_argument("--pg-service", default="maoxx_production")
     return parser
 
 
@@ -261,7 +306,43 @@ def run(args: argparse.Namespace) -> int:
         notification.validate()
         if args.verify_github:
             verify_github_state(_github_evidence_from_args(args))
-        return 0 if _send(notification) else 1
+        return 0 if _send(notification).sent else 1
+
+    if args.command == "provision-principal":
+        with SessionLocal() as db:
+            principal = provision_principal(
+                db,
+                principal_type=args.principal_type,
+                identity_key=args.identity_key,
+                user_id=args.user_id,
+            )
+        print(f"principal_id={principal.id}")
+        return 0
+
+    if args.command == "assign-feishu-identity":
+        with SessionLocal() as db:
+            mapping = assign_feishu_identity(
+                db,
+                tenant_id=args.tenant_id,
+                open_id=args.open_id,
+                principal_id=args.principal_id,
+                audit_event_id=uuid4(),
+            )
+        print(f"mapping_id={mapping.id} version={mapping.mapping_version}")
+        return 0
+
+    if args.command == "create-backup":
+        authority = ProductionBackupAuthority(
+            session_factory=SessionLocal,
+            backup_root=args.backup_root,
+            pg_service=args.pg_service,
+        )
+        evidence = authority.create_and_verify(args.deployment_id)
+        print(
+            f"backup_evidence_key={evidence.evidence_key} "
+            f"status={evidence.status_code}"
+        )
+        return 0
 
     if args.verify_github:
         verify_github_state(_github_evidence_from_args(args))
@@ -288,7 +369,14 @@ def run(args: argparse.Namespace) -> int:
         expires_at=request.expires_at,
     )
     notification.validate()
-    return 0 if _send(notification) else 1
+    result = _send(notification)
+    if result.sent and result.message_id:
+        with SessionLocal() as db:
+            persisted = db.get(ApprovalRequest, request.id)
+            if persisted is not None:
+                persisted.card_message_id = result.message_id
+                db.commit()
+    return 0 if result.sent else 1
 
 
 def main() -> None:
@@ -300,6 +388,8 @@ def main() -> None:
         ApprovalValidationError,
         NotificationValidationError,
         GitHubVerificationError,
+        IdentityAuthorityError,
+        BackupAuthorityError,
     ) as exc:
         print(f"supervision request rejected: {exc}", file=sys.stderr)
         raise SystemExit(2) from None

@@ -390,6 +390,10 @@ class ApprovalRequest(Base):
         DateTime(timezone=True),
         nullable=False,
     )
+    card_message_id: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
 
 
 class ApprovalDecision(Base):

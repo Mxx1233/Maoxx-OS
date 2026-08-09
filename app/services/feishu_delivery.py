@@ -22,6 +22,7 @@ class DeliveryResult:
     sent: bool
     attempts: int
     failure_reason: str | None = None
+    message_id: str | None = None
 
 
 def deliver_with_retry(
@@ -31,6 +32,7 @@ def deliver_with_retry(
     backoff_seconds: float,
     sleep: Callable[[float], None] = time.sleep,
     random_value: Callable[[], float] = random.random,
+    message_id_of: Callable[[ReplyResponse], str | None] | None = None,
 ) -> DeliveryResult:
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
@@ -57,7 +59,8 @@ def deliver_with_retry(
             )
         else:
             if response.success():
-                return DeliveryResult(True, attempt)
+                message_id = message_id_of(response) if message_id_of else None
+                return DeliveryResult(True, attempt, message_id=message_id)
 
             code = int(response.code)
             if code not in TRANSIENT_RESPONSE_CODES:
