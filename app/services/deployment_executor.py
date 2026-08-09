@@ -1,95 +1,48 @@
-"""The only production-mutation boundary for Phase 1D-F.
+"""Production execution entry point.
 
-It does not accept a caller-built execution object.  Each invocation reloads
-authoritative database state and marks one persisted execution attempt before
-the fencing-aware adapter is allowed to mutate a runtime.
+Application code may identify a persisted attempt only.  The host-local
+supervisor owns every Docker mutation, durable journal, observation and health
+decision.  The former in-process adapter API is permanently fail closed.
 """
 
-from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
-from app.services.deployment_authority import (
-    AtomicDockerProductionAdapter,
-    AuthoritativeRuntimeObserver,
-    DockerProductionRuntimeObserver,
-    FencingAwareExecutionAdapter,
-    GitHubCliProtectedMainCiVerifier,
-    ProtectedMainCiVerifier,
-)
-from pathlib import Path
-from app.services.deployment_service import (
-    DeploymentGateError,
-    prepare_authoritative_mutation,
-    reconcile_authoritative_execution,
+from app.services.deployment_service import DeploymentGateError
+from app.services.deployment_authority import GitHubCliProtectedMainCiVerifier
+from app.config import settings
+from app.services.production_supervisor import (
+    DockerComposeSupervisorRuntime,
+    ProductionDeploymentSupervisor,
+    SQLAlchemyAttemptAuthority,
 )
 
 
-@dataclass(frozen=True)
-class ControlledExecutionBoundary:
-    """Database-authoritative, fenced executor boundary."""
-
-    adapter: FencingAwareExecutionAdapter
-    ci_verifier: ProtectedMainCiVerifier
-    runtime_observer: AuthoritativeRuntimeObserver
-
-    def execute(
-        self,
-        db: Session,
-        *,
-        deployment_id: UUID,
-        execution_id: UUID,
-        executor_identity: str,
-        fencing_token: int,
-    ) -> str:
-        execution = prepare_authoritative_mutation(
-            db,
-            deployment_id=deployment_id,
-            execution_id=execution_id,
-            executor_identity=executor_identity,
-            fencing_token=fencing_token,
-            ci_verifier=self.ci_verifier,
-            runtime_observer=self.runtime_observer,
-        )
-        self.adapter.mutate_atomically(
-            deployment_id=execution.deployment_id,
-            execution_id=execution.execution_id,
-            fencing_token=execution.fencing_token,
-            image_reference=execution.image_reference,
-            artifact_digest=execution.artifact_digest,
-            target_sha=execution.target_sha,
-            services=execution.services,
-            expected_current_revision=execution.expected_current_revision,
-        )
-        return reconcile_authoritative_execution(
-            db,
-            deployment_id=deployment_id,
-            execution_id=execution_id,
-            executor_identity=executor_identity,
-            fencing_token=fencing_token,
-            ci_verifier=self.ci_verifier,
-            runtime_observer=self.runtime_observer,
-            evidence_key=f"reconcile-{execution_id}",
-        )
-
-    def deploy(self, *args, **kwargs) -> str:
-        """Reject the former caller-constructed execution API."""
-        del args, kwargs
-        raise DeploymentGateError("caller_constructed_execution_forbidden")
-
-
-def production_execution_boundary(
-    session_factory,
-) -> ControlledExecutionBoundary:
-    """Only Production wiring: concrete authenticated/read-only authorities."""
-    compose_file = Path("/opt/maoxx-os/docker-compose.yml")
-    return ControlledExecutionBoundary(
-        adapter=AtomicDockerProductionAdapter(
-            session_factory=session_factory, compose_file=compose_file
+def production_supervisor(session_factory) -> ProductionDeploymentSupervisor:
+    return ProductionDeploymentSupervisor(
+        authority=SQLAlchemyAttemptAuthority(
+            session_factory,
+            GitHubCliProtectedMainCiVerifier(
+                repository=settings.deployment_github_repository,
+                repository_id=settings.deployment_github_repository_id,
+                workflow_id=settings.deployment_github_workflow_id,
+                workflow_path=settings.deployment_github_workflow_path,
+            ),
         ),
-        ci_verifier=GitHubCliProtectedMainCiVerifier(),
-        runtime_observer=DockerProductionRuntimeObserver(
-            compose_file=compose_file
+        runtime=DockerComposeSupervisorRuntime(
+            compose_file=Path("/opt/maoxx-os/docker-compose.yml")
         ),
     )
+
+
+def execute_from_application(*_args: object, **_kwargs: object) -> None:
+    raise DeploymentGateError("host_supervisor_required")
+
+
+def caller_constructed_execution(_execution: object) -> None:
+    raise DeploymentGateError("caller_constructed_execution_forbidden")
+
+
+def submit_attempt_identifier(execution_attempt_id: UUID) -> UUID:
+    """Transport-only identifier for a separately governed supervisor invocation."""
+    return execution_attempt_id

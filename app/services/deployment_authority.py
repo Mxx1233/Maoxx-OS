@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
-from pathlib import Path
 from typing import Callable, Protocol
 from uuid import UUID
 
@@ -53,6 +52,14 @@ class CanonicalExecutorIdentity:
         return sha256(f"service:{self.service_id}".encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class ResolvedExternalHuman:
+    identity: CanonicalHumanIdentity
+    principal_id: UUID
+    mapping_id: UUID
+    mapping_version: int
+
+
 class CanonicalIdentityResolver(Protocol):
     def resolve_human(self, user_id: UUID) -> CanonicalHumanIdentity: ...
 
@@ -62,7 +69,7 @@ class CanonicalIdentityResolver(Protocol):
 
 
 def external_identity_fingerprint(value: str) -> str:
-    return sha256(f"external:feishu:{value}".encode()).hexdigest()
+    return sha256(f"external:{value}".encode()).hexdigest()
 
 
 class DatabaseCanonicalIdentityResolver:
@@ -72,31 +79,54 @@ class DatabaseCanonicalIdentityResolver:
         self.db = db
 
     def resolve_human(self, user_id: UUID) -> CanonicalHumanIdentity:
-        from app.models import User
+        from sqlalchemy import select
 
-        if self.db.get(User, user_id) is None:
+        from app.models import Principal
+
+        principal = self.db.execute(
+            select(Principal).where(
+                Principal.user_id == user_id,
+                Principal.principal_type == "HUMAN",
+            )
+        ).scalar_one_or_none()
+        if principal is None:
             raise ValueError("unknown_canonical_human")
         return CanonicalHumanIdentity(user_id)
 
-    def resolve_feishu_open_id(self, open_id: str) -> CanonicalHumanIdentity:
+    def resolve_feishu_open_id(
+        self, tenant_id: str, open_id: str
+    ) -> CanonicalHumanIdentity:
+        return self.resolve_feishu_principal(tenant_id, open_id).identity
+
+    def resolve_feishu_principal(
+        self, tenant_id: str, open_id: str
+    ) -> ResolvedExternalHuman:
         from sqlalchemy import select
 
-        from app.models import ExternalIdentity
+        from app.models import ExternalIdentity, Principal
 
-        rows = (
-            self.db.execute(
-                select(ExternalIdentity).where(
-                    ExternalIdentity.provider == "feishu",
-                    ExternalIdentity.subject_fingerprint
-                    == external_identity_fingerprint(open_id),
-                )
+        rows = self.db.execute(
+            select(ExternalIdentity, Principal)
+            .join(Principal, Principal.id == ExternalIdentity.principal_id)
+            .where(
+                ExternalIdentity.provider == "feishu",
+                ExternalIdentity.tenant_fingerprint
+                == external_identity_fingerprint(f"tenant:{tenant_id}"),
+                ExternalIdentity.subject_fingerprint
+                == external_identity_fingerprint(f"subject:{open_id}"),
+                ExternalIdentity.valid_to.is_(None),
+                Principal.principal_type == "HUMAN",
             )
-            .scalars()
-            .all()
-        )
-        if len(rows) != 1:
+        ).all()
+        if len(rows) != 1 or rows[0][1].user_id is None:
             raise ValueError("missing_or_ambiguous_feishu_identity")
-        return CanonicalHumanIdentity(rows[0].user_id)
+        mapping, principal = rows[0]
+        return ResolvedExternalHuman(
+            CanonicalHumanIdentity(principal.user_id),
+            principal.id,
+            mapping.id,
+            mapping.mapping_version,
+        )
 
     def resolve_executor(self, service_id: str) -> CanonicalExecutorIdentity:
         if service_id not in {"controlled-deployment-executor"}:
@@ -150,33 +180,31 @@ class AuthoritativeRuntimeObserver(Protocol):
     ) -> RuntimeObservation: ...
 
 
-class FencingAwareExecutionAdapter(Protocol):
-    def mutate_atomically(
-        self,
-        *,
-        deployment_id: UUID,
-        execution_id: UUID,
-        fencing_token: int,
-        image_reference: str,
-        artifact_digest: str,
-        target_sha: str,
-        services: tuple[str, ...],
-        expected_current_revision: str | None,
-    ) -> None: ...
-
-
 class GitHubCliProtectedMainCiVerifier:
     """Concrete authenticated verifier restricted to read-only GitHub API calls."""
 
     def __init__(
         self,
+        *,
+        repository: str,
+        repository_id: int,
+        workflow_id: int,
+        workflow_path: str,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
+        self._repository = repository
+        self._repository_id = repository_id
+        self._workflow_id = workflow_id
+        self._workflow_path = workflow_path
         self._run = run
 
     def _api(self, path: str) -> dict | list:
         result = self._run(
-            ["gh", "api", path], text=True, capture_output=True, check=False
+            ["gh", "api", path],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
         )
         if result.returncode != 0:
             raise ValueError("github_authority_unavailable")
@@ -188,45 +216,65 @@ class GitHubCliProtectedMainCiVerifier:
     def verify(
         self, *, repository: str, target_sha: str, run_id: int
     ) -> VerifiedCiEvidence:
-        run = self._api(f"repos/{repository}/actions/runs/{run_id}")
-        branches = self._api(
-            f"repos/{repository}/commits/{target_sha}/branches-where-head"
+        if repository != self._repository:
+            raise ValueError("github_repository_not_configured")
+        repo = self._api(f"repos/{repository}")
+        workflow = self._api(
+            f"repos/{repository}/actions/workflows/{self._workflow_id}"
         )
-        checks = self._api(
-            f"repos/{repository}/commits/{target_sha}/check-runs"
+        run = self._api(f"repos/{repository}/actions/runs/{run_id}")
+        comparison = self._api(
+            f"repos/{repository}/compare/{target_sha}...main"
         )
         if (
-            not isinstance(run, dict)
-            or not isinstance(branches, list)
-            or not isinstance(checks, dict)
+            not isinstance(repo, dict)
+            or not isinstance(workflow, dict)
+            or not isinstance(run, dict)
+            or not isinstance(comparison, dict)
         ):
             raise ValueError("github_authority_invalid_response")
-        quality = [
-            check
-            for check in checks.get("check_runs", [])
-            if check.get("name") == "CI / Quality Gate"
-        ]
-        on_main = any(
-            branch.get("name") == "main" and branch.get("protected") is True
-            for branch in branches
+        attempt = run.get("run_attempt")
+        if not isinstance(attempt, int) or attempt < 1:
+            raise ValueError("github_authority_invalid_attempt")
+        jobs = self._api(
+            f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
         )
+        if not isinstance(jobs, dict):
+            raise ValueError("github_authority_invalid_response")
+        quality = [
+            job
+            for job in jobs.get("jobs", [])
+            if job.get("name") == "CI / Quality Gate"
+        ]
+        merge_base = comparison.get("merge_base_commit", {}).get("sha")
         if (
-            run.get("repository", {}).get("full_name") != repository
+            repo.get("id") != self._repository_id
+            or repo.get("full_name") != repository
+            or repo.get("default_branch") != "main"
+            or workflow.get("id") != self._workflow_id
+            or workflow.get("path") != self._workflow_path
+            or workflow.get("state") != "active"
+            or run.get("repository", {}).get("full_name") != repository
+            or run.get("repository", {}).get("id") != self._repository_id
+            or run.get("workflow_id") != self._workflow_id
+            or run.get("id") != run_id
             or run.get("head_sha") != target_sha
+            or run.get("head_branch") != "main"
             or run.get("event") != "push"
             or run.get("status") != "completed"
             or run.get("conclusion") != "success"
+            or run.get("actor", {}).get("type") not in {"User", "Bot"}
             or len(quality) != 1
-            or quality[0].get("head_sha") != target_sha
             or quality[0].get("conclusion") != "success"
-            or not on_main
+            or quality[0].get("status") != "completed"
+            or merge_base != target_sha
         ):
             raise ValueError("github_authority_verification_failed")
         return VerifiedCiEvidence(
             repository=repository,
             target_sha=target_sha,
             run_id=run_id,
-            workflow_name=str(run.get("name") or run.get("workflow_id")),
+            workflow_name=f"{self._workflow_id}:{self._workflow_path}",
             event="push",
             status="completed",
             conclusion="success",
@@ -236,205 +284,9 @@ class GitHubCliProtectedMainCiVerifier:
             provenance={
                 "source": "gh_api",
                 "run_url": str(run.get("html_url", "")),
+                "repository_id": str(self._repository_id),
+                "run_attempt": str(attempt),
+                "quality_gate_job_id": str(quality[0].get("id")),
             },
         )
 
-
-class FilesystemBackupVerifier:
-    """Concrete custom-format archive verifier; never trusts caller booleans."""
-
-    def __init__(
-        self,
-        run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-    ) -> None:
-        self._run = run
-
-    def verify(
-        self,
-        *,
-        archive: Path,
-        deployment_id: UUID,
-        created_at: datetime,
-        state_scope: str,
-        restore_probe_ref: str,
-    ) -> dict:
-        if not archive.is_file() or archive.stat().st_size <= 0:
-            raise ValueError("backup_archive_missing_or_empty")
-        digest = sha256(archive.read_bytes()).hexdigest()
-        catalog = self._run(
-            ["pg_restore", "--list", str(archive)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if (
-            catalog.returncode != 0
-            or not catalog.stdout.strip()
-            or not restore_probe_ref
-        ):
-            raise ValueError("backup_catalog_or_recoverability_failed")
-        return {
-            "deployment_id": str(deployment_id),
-            "archive_id": archive.name,
-            "sha256": digest,
-            "nonempty": True,
-            "catalog_validated": True,
-            "restore_verification_ref": restore_probe_ref,
-            "created_at": created_at.astimezone(UTC).isoformat(),
-            "persistent_state_scope": state_scope,
-            "verifier": "filesystem_pg_restore_v1",
-        }
-
-
-class DockerProductionRuntimeObserver:
-    """Concrete read-only observer for the fixed Production compose project."""
-
-    def __init__(
-        self,
-        *,
-        compose_file: Path,
-        run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-    ) -> None:
-        self._compose_file = compose_file
-        self._run = run
-
-    def observe(
-        self,
-        *,
-        deployment_id: UUID,
-        execution_id: UUID | None,
-        fencing_token: int,
-    ) -> RuntimeObservation:
-        result = self._run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                str(self._compose_file),
-                "ps",
-                "--format",
-                "json",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        now = datetime.now(UTC)
-        if result.returncode != 0:
-            return RuntimeObservation(
-                execution_id or UUID(int=0),
-                deployment_id,
-                fencing_token,
-                RuntimeState.UNKNOWN,
-                None,
-                None,
-                {},
-                None,
-                now,
-                {"source": "docker_compose"},
-            )
-        try:
-            rows = json.loads(result.stdout or "[]")
-        except json.JSONDecodeError:
-            rows = []
-        if not isinstance(rows, list):
-            rows = []
-        running = bool(rows) and all(
-            str(row.get("State", "")).lower() == "running" for row in rows
-        )
-        state = (
-            RuntimeState.MUTATION_COMPLETED_HEALTH_UNKNOWN
-            if running
-            else RuntimeState.UNKNOWN
-        )
-        return RuntimeObservation(
-            execution_id or UUID(int=0),
-            deployment_id,
-            fencing_token,
-            state,
-            None,
-            None,
-            {},
-            None,
-            now,
-            {"source": "docker_compose", "containers": str(len(rows))},
-        )
-
-
-class AtomicDockerProductionAdapter:
-    """Restricted target: lock/fence validation and compose mutation share one DB transaction."""
-
-    def __init__(
-        self,
-        *,
-        session_factory,
-        compose_file: Path,
-        run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-    ) -> None:
-        self._sessions = session_factory
-        self._compose_file = compose_file
-        self._run = run
-
-    def mutate_atomically(
-        self,
-        *,
-        deployment_id: UUID,
-        execution_id: UUID,
-        fencing_token: int,
-        image_reference: str,
-        artifact_digest: str,
-        target_sha: str,
-        services: tuple[str, ...],
-        expected_current_revision: str | None,
-    ) -> None:
-        del (
-            image_reference,
-            artifact_digest,
-            target_sha,
-            expected_current_revision,
-        )
-        if not services or any(
-            service not in {"api", "feishu-worker"} for service in services
-        ):
-            raise ValueError("noncanonical_service_set")
-        from sqlalchemy import select
-        from app.models import DeploymentExecutionAttempt, DeploymentLock
-
-        with self._sessions() as db:
-            lock = db.execute(
-                select(DeploymentLock)
-                .where(
-                    DeploymentLock.conflict_domain
-                    == PRODUCTION_CONFLICT_DOMAIN
-                )
-                .with_for_update()
-            ).scalar_one_or_none()
-            attempt = db.get(DeploymentExecutionAttempt, execution_id)
-            if (
-                lock is None
-                or attempt is None
-                or lock.deployment_id != deployment_id
-                or attempt.deployment_id != deployment_id
-                or lock.fencing_token != fencing_token
-                or attempt.fencing_token != fencing_token
-            ):
-                raise ValueError("atomic_fencing_rejected")
-            result = self._run(
-                [
-                    "docker",
-                    "compose",
-                    "-f",
-                    str(self._compose_file),
-                    "up",
-                    "-d",
-                    "--no-deps",
-                    *services,
-                ],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode != 0:
-                db.rollback()
-                raise ValueError("restricted_runtime_mutation_failed")
-            db.commit()

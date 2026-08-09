@@ -13,10 +13,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
@@ -68,18 +69,28 @@ class User(Base):
 
 
 class ExternalIdentity(Base):
-    """Trusted, privacy-safe one-to-one external-principal mapping."""
+    """Append-only, privacy-safe versioned external-principal mapping."""
 
     __tablename__ = "external_identities"
     __table_args__ = (
-        CheckConstraint("provider = 'feishu'", name="provider"),
         UniqueConstraint(
             "provider",
+            "tenant_fingerprint",
             "subject_fingerprint",
-            name="uq_external_identities_provider_subject",
+            "mapping_version",
+            name="uq_external_identities_mapping_version",
         ),
-        UniqueConstraint(
-            "provider", "user_id", name="uq_external_identities_provider_user"
+        CheckConstraint("mapping_version > 0", name="mapping_version"),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_to > valid_from", name="validity"
+        ),
+        Index(
+            "uq_external_identities_active_subject",
+            "provider",
+            "tenant_fingerprint",
+            "subject_fingerprint",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
         ),
         {"schema": "core"},
     )
@@ -88,14 +99,58 @@ class ExternalIdentity(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    tenant_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     subject_fingerprint: Mapped[str] = mapped_column(
         String(64), nullable=False
     )
-    user_id: Mapped[UUID] = mapped_column(
+    principal_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        ForeignKey("core.principals.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    mapping_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    audit_event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+
+    principal: Mapped["Principal"] = relationship(
+        "Principal",
+        passive_deletes=True,
+    )
+
+
+class Principal(Base):
+    __tablename__ = "principals"
+    __table_args__ = (
+        CheckConstraint(
+            "principal_type IN ('HUMAN', 'SERVICE', 'EXECUTOR')", name="type"
+        ),
+        CheckConstraint(
+            "(principal_type = 'HUMAN' AND user_id IS NOT NULL) OR "
+            "(principal_type IN ('SERVICE', 'EXECUTOR') AND user_id IS NULL)",
+            name="human_user_binding",
+        ),
+        UniqueConstraint("user_id", name="uq_principals_user_id"),
+        UniqueConstraint("identity_key", name="uq_principals_identity_key"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    principal_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.users.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    identity_key: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -380,6 +435,11 @@ class ApprovalDecision(Base):
         ForeignKey("core.users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    actor_external_identity_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.external_identities.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     approver_identity_fingerprint: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
@@ -465,6 +525,16 @@ class DeploymentIntent(Base):
         ForeignKey("core.users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    requester_principal_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.principals.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    requester_external_identity_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("core.external_identities.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     intent_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     action_code: Mapped[str] = mapped_column(String(32), nullable=False)
     repository: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -503,6 +573,19 @@ class DeploymentIntent(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+    requester_principal: Mapped["Principal"] = relationship(
+        "Principal",
+        passive_deletes=True,
+    )
+    requester_external_identity: Mapped["ExternalIdentity"] = relationship(
+        "ExternalIdentity",
+        passive_deletes=True,
+    )
+    requester_user: Mapped["User"] = relationship(
+        "User",
+        passive_deletes=True,
     )
 
 
@@ -551,6 +634,7 @@ class DeploymentArtifact(Base):
     target_sha: Mapped[str] = mapped_column(String(40), nullable=False)
     digest: Mapped[str] = mapped_column(String(71), nullable=False)
     image_reference: Mapped[str] = mapped_column(String(500), nullable=False)
+    service_images: Mapped[dict] = mapped_column(JSONB, nullable=False)
     ci_run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     ci_event: Mapped[str] = mapped_column(String(32), nullable=False)
     ci_status: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -886,6 +970,7 @@ class DeploymentExecutionAttempt(Base):
     execution_key: Mapped[str] = mapped_column(String(200), nullable=False)
     executor_identity: Mapped[str] = mapped_column(String(200), nullable=False)
     fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    intent_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -895,7 +980,7 @@ class DeploymentEvidence(Base):
     __tablename__ = "deployment_evidence"
     __table_args__ = (
         CheckConstraint(
-            "status_code IN ('passed', 'failed', 'recorded')",
+            "status_code IN ('pending', 'passed', 'failed', 'recorded')",
             name="status_code",
         ),
         UniqueConstraint(

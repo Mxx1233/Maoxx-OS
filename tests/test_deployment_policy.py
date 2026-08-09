@@ -1,7 +1,7 @@
 import unittest
 from uuid import uuid4
 
-from app.services.deployment_executor import ControlledExecutionBoundary
+from app.services.deployment_executor import caller_constructed_execution
 from app.services.deployment_notifications import DeploymentNotification
 from app.services.deployment_policy import (
     DeploymentPolicyError,
@@ -14,10 +14,7 @@ from app.services.deployment_policy import (
     validate_migration_plan,
     validate_service_set,
 )
-from app.services.deployment_service import (
-    DeploymentGateError,
-    ValidatedExecution,
-)
+from app.services.deployment_service import DeploymentGateError
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -152,36 +149,11 @@ class DeploymentPolicyTests(unittest.TestCase):
     def test_forged_execution_snapshot_cannot_reach_adapter(
         self,
     ) -> None:
-        class Adapter:
-            called = False
-
-        class Verifier:
-            pass
-
-        class Observer:
-            pass
-
-        adapter = Adapter()
-        execution = ValidatedExecution(
-            deployment_id=uuid4(),
-            intent_kind="deploy",
-            repository="Mxx1233/Maoxx-OS",
-            target_sha=SHA,
-            environment="production",
-            action_code="production_deploy",
-            artifact_digest=DIGEST,
-            image_reference=f"registry.example/maoxx@{DIGEST}",
-            services=("api",),
-            lock_owner="executor-1",
-            approval_consumption_id=uuid4(),
-        )
-        boundary = ControlledExecutionBoundary(adapter, Verifier(), Observer())
         with self.assertRaises(DeploymentGateError) as rejected:
-            boundary.deploy(execution)
+            caller_constructed_execution(object())
         self.assertEqual(
             rejected.exception.code, "caller_constructed_execution_forbidden"
         )
-        self.assertFalse(adapter.called)
 
     def test_notification_is_fixed_and_contains_no_execution_claim(
         self,

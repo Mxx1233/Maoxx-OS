@@ -224,6 +224,7 @@ def record_approval_decision(
     feishu_event_id: str,
     actor_user_id: UUID,
     actor_open_id: str,
+    actor_external_identity_id: UUID | None = None,
 ) -> ApprovalOutcome:
     if not feishu_event_id or len(feishu_event_id) > 200:
         return ApprovalOutcome("invalid_event")
@@ -252,6 +253,11 @@ def record_approval_decision(
         ).scalar_one_or_none()
         if request is None:
             return ApprovalOutcome("unknown_request")
+        if request.deployment_id is not None and (
+            actor_external_identity_id is None
+            or request.user_id == actor_user_id
+        ):
+            return ApprovalOutcome("unauthorized")
 
         # PostgreSQL CURRENT_TIMESTAMP is fixed at transaction start.  This
         # wall-clock read must happen after the row lock so time spent waiting
@@ -273,6 +279,7 @@ def record_approval_decision(
                 request_id=command.request_id,
                 decision_code=command.decision_code,
                 actor_user_id=actor_user_id,
+                actor_external_identity_id=actor_external_identity_id,
                 approver_identity_fingerprint=actor_fingerprint,
                 feishu_event_id=feishu_event_id,
                 decided_at=database_now,
@@ -338,6 +345,7 @@ def process_approval_card_action(
     allowed_open_ids: frozenset[str],
     approver_open_ids: frozenset[str],
     supervision_chat_id: str,
+    actor_external_identity_id: UUID | None = None,
 ) -> ApprovalOutcome:
     if action not in {"approve", "reject", "wait"}:
         return ApprovalOutcome("malformed")
@@ -365,6 +373,7 @@ def process_approval_card_action(
         feishu_event_id=feishu_event_id,
         actor_user_id=actor_user_id,
         actor_open_id=operator_open_id,
+        actor_external_identity_id=actor_external_identity_id,
     )
 
 

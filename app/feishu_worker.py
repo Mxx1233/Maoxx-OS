@@ -281,6 +281,8 @@ def _approval_notification_from_request(
         approval_request_id=request.id,
         action_code=request.action_code,
         expires_at=request.expires_at,
+        deployment_id=getattr(request, "deployment_id", None),
+        artifact_digest=getattr(request, "artifact_digest", None),
     )
 
 
@@ -312,13 +314,23 @@ def handle_card_action(
             with SessionLocal() as db:
                 request = db.get(ApprovalRequest, parsed.request_id)
                 actor_user_id = settings.default_user_id
+                actor_external_identity_id = None
                 if (
                     isinstance(request, ApprovalRequest)
-                    and request.deployment_id is not None
+                    and getattr(request, "deployment_id", None) is not None
                 ):
-                    actor_user_id = DatabaseCanonicalIdentityResolver(
+                    resolved_actor = DatabaseCanonicalIdentityResolver(
                         db
-                    ).resolve_feishu_open_id(operator_open_id or "").user_id
+                    ).resolve_feishu_principal(
+                        str(
+                            header.get("tenant_key")
+                            or operator.get("tenant_key")
+                            or ""
+                        ),
+                        operator_open_id or "",
+                    )
+                    actor_user_id = resolved_actor.identity.user_id
+                    actor_external_identity_id = resolved_actor.mapping_id
                 outcome = process_approval_card_action(
                     db,
                     action=parsed.action,
@@ -329,6 +341,7 @@ def handle_card_action(
                     chat_id=context.get("open_chat_id"),
                     feishu_event_id=event_id or "",
                     actor_user_id=actor_user_id,
+                    actor_external_identity_id=actor_external_identity_id,
                     allowed_tenant_keys=settings.allowed_tenant_keys,
                     allowed_open_ids=settings.allowed_open_ids,
                     approver_open_ids=settings.approver_open_ids,

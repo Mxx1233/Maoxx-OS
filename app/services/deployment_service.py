@@ -33,7 +33,6 @@ from app.services.deployment_policy import (
     DeploymentPolicyError,
     MigrationRisk,
     ResourceSample,
-    evaluate_resource_window,
     health_checks_are_complete,
     require_transition,
     validate_immutable_artifact,
@@ -158,7 +157,7 @@ def _resolve_human_identity(
 
 
 def _resolve_executor_identity(service_id: str) -> CanonicalExecutorIdentity:
-    if not OWNER_PATTERN.fullmatch(service_id):
+    if service_id != "maoxx-production-deployment-supervisor":
         raise DeploymentGateError("unknown_or_ambiguous_executor_identity")
     return CanonicalExecutorIdentity(service_id)
 
@@ -272,6 +271,7 @@ def _validate_intent_fields(
 def create_deployment_intent(
     db: Session,
     *,
+    authenticated_feishu_tenant_id: str,
     authenticated_feishu_open_id: str,
     intent_kind: str,
     repository: str,
@@ -285,13 +285,16 @@ def create_deployment_intent(
     idempotency_key: str,
 ) -> DeploymentIntent:
     try:
-        requester = DatabaseCanonicalIdentityResolver(
+        resolved_requester = DatabaseCanonicalIdentityResolver(
             db
-        ).resolve_feishu_open_id(authenticated_feishu_open_id)
+        ).resolve_feishu_principal(
+            authenticated_feishu_tenant_id, authenticated_feishu_open_id
+        )
     except ValueError as exc:
         raise DeploymentGateError(
             "unknown_or_ambiguous_requester_identity"
         ) from exc
+    requester = resolved_requester.identity
     user_id = requester.user_id
     action_code = {
         "deploy": "production_deploy",
@@ -318,6 +321,8 @@ def create_deployment_intent(
     ).scalar_one_or_none()
     expected = (
         user_id,
+        resolved_requester.principal_id,
+        resolved_requester.mapping_id,
         intent_kind,
         repository,
         target_sha,
@@ -332,6 +337,8 @@ def create_deployment_intent(
     if existing is not None:
         actual = (
             existing.user_id,
+            existing.requester_principal_id,
+            existing.requester_external_identity_id,
             existing.intent_kind,
             existing.repository,
             existing.target_sha,
@@ -349,6 +356,8 @@ def create_deployment_intent(
 
     intent = DeploymentIntent(
         user_id=user_id,
+        requester_principal_id=resolved_requester.principal_id,
+        requester_external_identity_id=resolved_requester.mapping_id,
         intent_kind=intent_kind,
         action_code=action_code,
         repository=repository,
@@ -463,6 +472,7 @@ def record_artifact(
             existing.target_sha,
             existing.digest,
             existing.image_reference,
+            existing.service_images,
             existing.ci_run_id,
             existing.ci_event,
             existing.ci_status,
@@ -479,6 +489,7 @@ def record_artifact(
             target_sha,
             digest,
             image_reference,
+            {service: image_reference for service in intent.service_set},
             verified.run_id,
             verified.event,
             verified.status,
@@ -499,6 +510,9 @@ def record_artifact(
         target_sha=target_sha,
         digest=digest,
         image_reference=image_reference,
+        service_images={
+            service: image_reference for service in intent.service_set
+        },
         ci_run_id=verified.run_id,
         ci_event=verified.event,
         ci_status=verified.status,
@@ -810,7 +824,7 @@ def _add_evidence(
         raise DeploymentPolicyError("unsupported evidence type")
     if not EVIDENCE_KEY_PATTERN.fullmatch(evidence_key):
         raise DeploymentPolicyError("invalid evidence key")
-    if status_code not in {"passed", "failed", "recorded"}:
+    if status_code not in {"pending", "passed", "failed", "recorded"}:
         raise DeploymentPolicyError("invalid evidence status")
     existing = db.execute(
         select(DeploymentEvidence).where(
@@ -850,68 +864,7 @@ def record_deployment_evidence(
     if evidence_type == "resource_gate":
         raise DeploymentGateError("resource_evidence_must_be_evaluated")
     if evidence_type == "predeploy_backup" and status_code == "passed":
-        required = {
-            "deployment_id",
-            "archive_id",
-            "sha256",
-            "nonempty",
-            "catalog_validated",
-            "restore_verification_ref",
-            "created_at",
-            "persistent_state_scope",
-            "verifier",
-        }
-        if (
-            set(payload) != required
-            or payload["nonempty"] is not True
-            or payload["catalog_validated"] is not True
-            or not isinstance(payload["archive_id"], str)
-            or not payload["archive_id"]
-            or not isinstance(payload["restore_verification_ref"], str)
-            or not payload["restore_verification_ref"]
-            or not isinstance(payload["persistent_state_scope"], str)
-            or not payload["persistent_state_scope"]
-            or payload["deployment_id"] != str(deployment_id)
-            or payload["verifier"] != "filesystem_pg_restore_v1"
-        ):
-            raise DeploymentGateError("invalid_backup_evidence")
-        if not re.fullmatch(r"[0-9a-f]{64}", str(payload["sha256"])):
-            raise DeploymentGateError("invalid_backup_checksum")
-        try:
-            created_at = datetime.fromisoformat(payload["created_at"])
-        except (TypeError, ValueError):
-            raise DeploymentGateError("invalid_backup_timestamp") from None
-        if created_at.tzinfo is None:
-            raise DeploymentGateError("invalid_backup_timestamp")
-    if evidence_type == "resource_gate" and status_code == "passed":
-        required = {
-            "deployment_id",
-            "checkpoint_id",
-            "completed_at",
-            "policy_version",
-            "sample_count",
-            "reason",
-            "median_mem_available_bytes",
-            "minimum_mem_available_bytes",
-            "samples",
-        }
-        if (
-            set(payload) != required
-            or payload["deployment_id"] != str(deployment_id)
-            or not isinstance(payload["checkpoint_id"], str)
-            or not payload["checkpoint_id"]
-            or not isinstance(payload["samples"], list)
-            or payload["sample_count"] != 7
-        ):
-            raise DeploymentGateError("invalid_resource_gate_evidence")
-        try:
-            completed_at = datetime.fromisoformat(payload["completed_at"])
-        except (TypeError, ValueError):
-            raise DeploymentGateError(
-                "invalid_resource_gate_timestamp"
-            ) from None
-        if completed_at.tzinfo is None:
-            raise DeploymentGateError("invalid_resource_gate_timestamp")
+        raise DeploymentGateError("backup_evidence_must_be_authority_verified")
     evidence = _add_evidence(
         db,
         deployment_id=deployment_id,
@@ -932,40 +885,8 @@ def record_resource_gate(
     evidence_key: str,
     samples: tuple[ResourceSample, ...],
 ) -> DeploymentEvidence:
-    result = evaluate_resource_window(samples)
-    completed_at = _database_now(db)
-    payload = {
-        "deployment_id": str(deployment_id),
-        "checkpoint_id": evidence_key,
-        "completed_at": completed_at.isoformat(),
-        "policy_version": "phase-1d-f-resource-v1",
-        "sample_count": len(samples),
-        "reason": result.reason,
-        "median_mem_available_bytes": result.median_mem_available_bytes,
-        "minimum_mem_available_bytes": result.minimum_mem_available_bytes,
-        "samples": [
-            {
-                "elapsed_ms": sample.elapsed_ms,
-                "mem_available_bytes": sample.mem_available_bytes,
-                "swap_free_bytes": sample.swap_free_bytes,
-                "root_free_bytes": sample.root_free_bytes,
-                "docker_free_bytes": sample.docker_free_bytes,
-            }
-            for sample in samples
-        ],
-    }
-    evidence = _add_evidence(
-        db,
-        deployment_id=deployment_id,
-        evidence_type="resource_gate",
-        evidence_key=evidence_key,
-        status_code="passed" if result.passed else "failed",
-        payload=payload,
-        occurred_at=completed_at,
-    )
-    db.commit()
-    db.refresh(evidence)
-    return evidence
+    del db, deployment_id, evidence_key, samples
+    raise DeploymentGateError("trusted_production_resource_collector_required")
 
 
 def acquire_deployment_lock(
@@ -1072,47 +993,9 @@ def reconcile_expired_production_lock(
     observer: AuthoritativeRuntimeObserver,
     evidence_key: str,
 ) -> None:
-    """Reconcile an expired owner before any new owner may take over."""
-    lock = db.execute(
-        select(DeploymentLock)
-        .where(DeploymentLock.conflict_domain == PRODUCTION_CONFLICT_DOMAIN)
-        .with_for_update()
-    ).scalar_one_or_none()
-    if lock is None:
-        raise DeploymentGateError("no_production_lock")
-    now = _database_now(db)
-    if lock.lease_expires_at > now:
-        raise DeploymentGateError("lock_not_expired")
-    observation = observer.observe(
-        deployment_id=lock.deployment_id,
-        execution_id=None,
-        fencing_token=lock.fencing_token,
-    )
-    if (
-        observation.deployment_id != lock.deployment_id
-        or observation.fencing_token != lock.fencing_token
-        or observation.state
-        in {RuntimeState.IN_PROGRESS, RuntimeState.UNKNOWN}
-    ):
-        raise DeploymentGateError("stale_owner_runtime_not_reconciled")
-    lock.stale_reconciled_at = now
-    lock.stale_reconciled_token = lock.fencing_token
-    lock.stale_reconciliation_evidence_key = evidence_key
-    _add_evidence(
-        db,
-        deployment_id=lock.deployment_id,
-        evidence_type="stale_lock_reconciliation",
-        evidence_key=evidence_key,
-        status_code="passed",
-        payload={
-            "prior_owner": lock.owner_identity,
-            "prior_fencing_token": lock.fencing_token,
-            "runtime_state": observation.state.value,
-            "observed_at": observation.observed_at.isoformat(),
-        },
-        occurred_at=now,
-    )
-    db.commit()
+    """Application callers cannot reconcile or transfer Production authority."""
+    del db, observer, evidence_key
+    raise DeploymentGateError("host_supervisor_reconciliation_required")
 
 
 def renew_deployment_lock(
@@ -1556,11 +1439,31 @@ def start_production_deployment(
         state_event_id=transition.id,
         consumed_at=now,
     )
-    attempt = DeploymentExecutionAttempt(
+    from app.services.production_supervisor import calculate_intent_hash
+
+    attempt_id = uuid4()
+    artifact = db.execute(
+        select(DeploymentArtifact).where(
+            DeploymentArtifact.deployment_id == deployment_id
+        )
+    ).scalar_one()
+    intent_hash = calculate_intent_hash(
         deployment_id=deployment_id,
-        execution_key=f"execution-{uuid4()}",
+        execution_attempt_id=attempt_id,
+        fencing_epoch=fencing_token,
+        repository=intent.repository,
+        target_sha=intent.target_sha,
+        service_images=dict(artifact.service_images),
+        artifact_digest=intent.artifact_digest,
+        expected_migration_revision=intent.migration_revision,
+    )
+    attempt = DeploymentExecutionAttempt(
+        id=attempt_id,
+        deployment_id=deployment_id,
+        execution_key=f"execution-{attempt_id}",
         executor_identity=executor.service_id,
         fencing_token=fencing_token,
+        intent_hash=intent_hash,
     )
     db.add_all((consumption, attempt))
     db.flush()
@@ -1574,6 +1477,7 @@ def start_production_deployment(
             "execution_id": str(attempt.id),
             "executor_identity": executor.service_id,
             "fencing_token": fencing_token,
+            "intent_hash": intent_hash,
         },
         occurred_at=now,
     )
@@ -1590,6 +1494,28 @@ def start_production_deployment(
 
 
 def prepare_authoritative_mutation(
+    db: Session,
+    *,
+    deployment_id: UUID,
+    execution_id: UUID,
+    executor_identity: str,
+    fencing_token: int,
+    ci_verifier: ProtectedMainCiVerifier,
+    runtime_observer: AuthoritativeRuntimeObserver,
+) -> _AuthoritativeExecution:
+    del (
+        db,
+        deployment_id,
+        execution_id,
+        executor_identity,
+        fencing_token,
+        ci_verifier,
+        runtime_observer,
+    )
+    raise DeploymentGateError("host_supervisor_required")
+
+
+def _retired_prepare_authoritative_mutation(
     db: Session,
     *,
     deployment_id: UUID,
@@ -1652,6 +1578,30 @@ def prepare_authoritative_mutation(
 
 
 def reconcile_authoritative_execution(
+    db: Session,
+    *,
+    deployment_id: UUID,
+    execution_id: UUID,
+    executor_identity: str,
+    fencing_token: int,
+    ci_verifier: ProtectedMainCiVerifier,
+    runtime_observer: AuthoritativeRuntimeObserver,
+    evidence_key: str,
+) -> str:
+    del (
+        db,
+        deployment_id,
+        execution_id,
+        executor_identity,
+        fencing_token,
+        ci_verifier,
+        runtime_observer,
+        evidence_key,
+    )
+    raise DeploymentGateError("host_supervisor_required")
+
+
+def _retired_reconcile_authoritative_execution(
     db: Session,
     *,
     deployment_id: UUID,

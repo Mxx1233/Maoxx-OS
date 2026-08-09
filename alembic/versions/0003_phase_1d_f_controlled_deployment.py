@@ -33,13 +33,11 @@ AUDIT_TABLES = (
 
 def upgrade() -> None:
     op.create_table(
-        "external_identities",
+        "principals",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("provider", sa.String(length=32), nullable=False),
-        sa.Column("subject_fingerprint", sa.String(length=64), nullable=False),
-        sa.Column(
-            "user_id", postgresql.UUID(as_uuid=True), nullable=False
-        ),
+        sa.Column("principal_type", sa.String(length=16), nullable=False),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("identity_key", sa.String(length=200), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -47,21 +45,97 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "provider = 'feishu'", name=op.f("ck_external_identities_provider")
+            "principal_type IN ('HUMAN', 'SERVICE', 'EXECUTOR')",
+            name=op.f("ck_principals_type"),
+        ),
+        sa.CheckConstraint(
+            "(principal_type = 'HUMAN' AND user_id IS NOT NULL) OR "
+            "(principal_type IN ('SERVICE', 'EXECUTOR') AND user_id IS NULL)",
+            name=op.f("ck_principals_human_user_binding"),
         ),
         sa.ForeignKeyConstraint(
             ["user_id"], ["core.users.id"], ondelete="RESTRICT"
         ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_external_identities")),
-        sa.UniqueConstraint(
-            "provider",
-            "subject_fingerprint",
-            name=op.f("uq_external_identities_provider_subject"),
-        ),
-        sa.UniqueConstraint(
-            "provider", "user_id", name=op.f("uq_external_identities_provider_user")
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_principals")),
+        sa.UniqueConstraint("user_id", name=op.f("uq_principals_user_id")),
+        sa.UniqueConstraint("identity_key", name=op.f("uq_principals_identity_key")),
         schema="core",
+    )
+    op.create_table(
+        "external_identities",
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("provider", sa.String(length=32), nullable=False),
+        sa.Column("tenant_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("subject_fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("principal_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("mapping_version", sa.Integer(), nullable=False),
+        sa.Column("valid_from", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("audit_event_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.CheckConstraint("mapping_version > 0", name=op.f("ck_external_identities_mapping_version")),
+        sa.CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name=op.f("ck_external_identities_validity")),
+        sa.ForeignKeyConstraint(["principal_id"], ["core.principals.id"], ondelete="RESTRICT"),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_external_identities")),
+        sa.UniqueConstraint("provider", "tenant_fingerprint", "subject_fingerprint", "mapping_version", name=op.f("uq_external_identities_mapping_version")),
+        schema="core",
+    )
+    op.create_index(
+        "uq_external_identities_active_subject",
+        "external_identities",
+        ["provider", "tenant_fingerprint", "subject_fingerprint"],
+        unique=True,
+        schema="core",
+        postgresql_where=sa.text("valid_to IS NULL"),
+    )
+    op.execute(
+        """
+        CREATE FUNCTION core.protect_external_identity_history()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'external identity history is append-only';
+            END IF;
+            IF OLD.valid_to IS NOT NULL OR NEW.valid_to IS NULL
+               OR NEW.valid_to <= OLD.valid_from
+               OR ROW(NEW.id, NEW.provider, NEW.tenant_fingerprint,
+                      NEW.subject_fingerprint, NEW.principal_id,
+                      NEW.mapping_version, NEW.valid_from,
+                      NEW.audit_event_id)
+                  IS DISTINCT FROM
+                  ROW(OLD.id, OLD.provider, OLD.tenant_fingerprint,
+                      OLD.subject_fingerprint, OLD.principal_id,
+                      OLD.mapping_version, OLD.valid_from,
+                      OLD.audit_event_id) THEN
+                RAISE EXCEPTION 'external identity history is immutable';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_external_identities_history
+        BEFORE UPDATE OR DELETE ON core.external_identities
+        FOR EACH ROW EXECUTE FUNCTION core.protect_external_identity_history()
+        """
+    )
+    op.add_column(
+        "approval_decisions",
+        sa.Column("actor_external_identity_id", postgresql.UUID(as_uuid=True), nullable=True),
+        schema="core",
+    )
+    op.create_foreign_key(
+        op.f("fk_approval_decisions_actor_external_identity_id_external_identities"),
+        "approval_decisions",
+        "external_identities",
+        ["actor_external_identity_id"],
+        ["id"],
+        source_schema="core",
+        referent_schema="core",
+        ondelete="RESTRICT",
     )
     op.drop_constraint(
         op.f("ck_approval_requests_action_code"),
@@ -98,6 +172,8 @@ def upgrade() -> None:
         "deployment_intents",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("requester_principal_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("requester_external_identity_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("intent_kind", sa.String(length=16), nullable=False),
         sa.Column("action_code", sa.String(length=32), nullable=False),
         sa.Column("repository", sa.String(length=200), nullable=False),
@@ -173,6 +249,8 @@ def upgrade() -> None:
             name=op.f("fk_deployment_intents_user_id_users"),
             ondelete="RESTRICT",
         ),
+        sa.ForeignKeyConstraint(["requester_principal_id"], ["core.principals.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["requester_external_identity_id"], ["core.external_identities.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_deployment_intents")),
         sa.UniqueConstraint(
             "idempotency_key",
@@ -228,6 +306,7 @@ def upgrade() -> None:
         sa.Column("target_sha", sa.String(length=40), nullable=False),
         sa.Column("digest", sa.String(length=71), nullable=False),
         sa.Column("image_reference", sa.String(length=500), nullable=False),
+        sa.Column("service_images", postgresql.JSONB(), nullable=False),
         sa.Column("ci_run_id", sa.BigInteger(), nullable=False),
         sa.Column("ci_event", sa.String(length=32), nullable=False),
         sa.Column("ci_status", sa.String(length=32), nullable=False),
@@ -674,6 +753,7 @@ def upgrade() -> None:
         sa.Column("execution_key", sa.String(length=200), nullable=False),
         sa.Column("executor_identity", sa.String(length=200), nullable=False),
         sa.Column("fencing_token", sa.BigInteger(), nullable=False),
+        sa.Column("intent_hash", sa.String(length=64), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -724,7 +804,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "status_code IN ('passed', 'failed', 'recorded')",
+            "status_code IN ('pending', 'passed', 'failed', 'recorded')",
             name=op.f("ck_deployment_evidence_status_code"),
         ),
         sa.ForeignKeyConstraint(
@@ -866,7 +946,24 @@ def downgrade() -> None:
         schema="core",
     )
     op.drop_table("deployment_artifacts", schema="core")
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_external_identities_history "
+        "ON core.external_identities"
+    )
+    op.execute(
+        "DROP FUNCTION IF EXISTS core.protect_external_identity_history()"
+    )
+    op.drop_constraint(
+        op.f("fk_approval_decisions_actor_external_identity_id_external_identities"),
+        "approval_decisions",
+        schema="core",
+        type_="foreignkey",
+    )
+    op.drop_column(
+        "approval_decisions", "actor_external_identity_id", schema="core"
+    )
     op.drop_table("external_identities", schema="core")
+    op.drop_table("principals", schema="core")
     op.drop_constraint(
         op.f("ck_approval_requests_deployment_binding"),
         "approval_requests",
